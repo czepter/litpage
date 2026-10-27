@@ -10,8 +10,13 @@ const { realtime } = await import('./realtime.ts');
 const { startScheduler } = await import('./scheduler.ts');
 const { bootstrapOwner } = await import('./bootstrap.ts');
 const { startDemoSandboxCleanup } = await import('./demoSandbox.ts');
+const { featureLevel, syncFeatureLevel } = await import('./featureLevel.ts');
+const { TEMPLATE_SPACE_ID } = await import('./seed.ts');
 
 bootstrapOwner();
+// NC_FEATURE_LEVEL applies to every workspace, including ones created before it was set or changed
+const moved = syncFeatureLevel([TEMPLATE_SPACE_ID]);
+if (moved) console.log(`[server] feature level ${featureLevel()}: updated ${moved} workspace${moved === 1 ? '' : 's'}`);
 scheduleDemoExit();
 // demo sandboxes past their lifetime: once now, then every few minutes
 startDemoSandboxCleanup();

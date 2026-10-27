@@ -117,7 +117,7 @@ try {
     await row('two-step').locator('.nc-set-btn', { hasText: 'Add a verification option' }).click();
     await page.waitForSelector(`${sub} [data-method="totp"]`);
     await shot('01-2fa-methods');
-    ok(await page.locator(`${sub} .nc-set-method[aria-disabled="true"]`, { hasText: 'Text a code to me' }).count() === 1, 'SMS method shown but unavailable');
+    ok(await page.locator(`${sub} .nc-set-method`, { hasText: 'Text a code to me' }).count() === 0, 'no SMS method');
     await page.click(`${sub} [data-method="totp"]`);
     await page.waitForSelector(`${sub} .nc-set-qr svg`);
     const uri = await page.getAttribute(`${sub} .nc-set-qr svg`, 'data-otpauth');

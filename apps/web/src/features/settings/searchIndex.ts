@@ -51,8 +51,7 @@ export function settingsIndex(): SettingsHit[] {
     { section: 'preferences', id: 'view-history', label: t('lp.settings.share_my_page_views', 'Share my page views'), keywords: ['analytics', 'privacy'] },
     { section: 'preferences', id: 'discoverability', label: t('lp.settings.profile_discoverability', 'Profile discoverability') },
     // Notifications
-    { section: 'notifications', label: t('lp.settings.notifications', 'Notifications'), keywords: ['email notifications', 'slack', 'digest', 'push'] },
-    { section: 'mail-calendar', label: t('lp.settings.mail_calendar', 'Mail & Calendar'), keywords: ['calendar', 'gmail'] },
+    { section: 'notifications', label: t('lp.settings.notifications', 'Notifications'), keywords: ['email notifications', 'digest', 'push'] },
     // Workspace › General
     { section: 'general', id: 'workspace-name', label: t('lp.settings.workspace_name', 'Workspace name') },
     { section: 'general', id: 'workspace-icon', label: t('lp.settings.icon', 'Icon') },
@@ -110,10 +109,7 @@ export function settingsIndex(): SettingsHit[] {
     { section: 'emoji', id: 'emoji-admin-only', label: t('lp.settings.emoji', 'Emoji'), keywords: ['custom emoji'] },
     { section: 'developers', id: 'developer-mode', label: t('lp.settings.turn_on_developer_features', 'Turn on developer features'), keywords: ['developer mode', 'api', 'token'] },
     { section: 'developers', id: 'new-token', label: t('lp.settings.generate_your_own_api_access_token', 'Generate your own API access token') },
-    // Access & billing
     { section: 'requests', label: t('lp.settings.requests', 'Requests') },
-    { section: 'billing', label: t('lp.settings.billing', 'Billing'), keywords: ['invoice', 'payment'] },
-    { section: 'plans', label: t('lp.settings.explore_plans', 'Explore plans'), keywords: ['upgrade', 'enterprise', 'business'] },
   ];
 }
 

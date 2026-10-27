@@ -13,7 +13,7 @@ import { Icon } from '../../../components/Icon.tsx';
 import { openMenu } from '../../../components/Menu.tsx';
 import { ImportPanel } from '../../import/ImportPanel.tsx';
 import { t } from '../../shell/i18n.ts';
-import { Badge, Button, Dropdown, Group, Pills, Row, SectionPage, Switch, Upsell, UserAvatar, confirmDialog, msg, openSubDialog, rich } from '../ui.tsx';
+import { Button, Dropdown, Group, Pills, Row, SectionPage, Switch, Upsell, UserAvatar, confirmDialog, msg, openSubDialog, rich } from '../ui.tsx';
 import { prefValue, savePref, savePrefs, usePrefs, type UserPrefs } from '../userSettings.ts';
 import { planAtLeast, saveSpaceSettings, spaceApi, spaceSetting, useSpaceAccess } from '../spaceSettings.ts';
 import { fmtDate } from './workspace.tsx';
@@ -28,23 +28,9 @@ function closeSettings() {
   useUI.getState().set({ settingsOpen: false });
 }
 
-function stub(what: string) {
-  useUI.getState().toast(t('lp.settings.isn_t_available_in_this_build', '{what} isn’t available in this build', { what }));
-}
-
 function titleOf(b: BlockRecord | undefined): string {
   const title = (b?.properties as any)?.title as [string, unknown?][] | undefined;
   return title?.map((x) => x[0]).join('') || t('lp.settings.untitled', 'Untitled');
-}
-
-/** Ask workspace owners for an upgrade (members) — recorded in Settings › Requests. */
-export async function requestUpgrade(spaceId: string, plan: string) {
-  try {
-    await spaceApi('requestUpgrade', { spaceId, plan });
-    useUI.getState().toast(t('lp.settings.request_sent_to_workspace_owners', 'Request sent to workspace owners'));
-  } catch (e) {
-    useUI.getState().toast((e as Error)?.message || t('lp.settings.something_went_wrong_while_processing_th', 'We hit a problem while processing that request.'));
-  }
 }
 
 // ---------------------------------------------------------------------------------------------- Import
@@ -62,22 +48,9 @@ export function ImportSection() {
 
 // ---------------------------------------------------------------------------------------------- Litpage AI
 
-const AI_CONNECTORS: { id: string; name: string; color: string; desc: string }[] = [
-  { id: 'slack', name: 'Slack', color: '#4a154b', desc: 'Search messages and channels' },
-  { id: 'google-drive', name: 'Google Drive', color: '#1a73e8', desc: 'Search docs, sheets and slides' },
-  { id: 'github', name: 'GitHub', color: '#1f2328', desc: 'Search issues, pull requests and code' },
-  { id: 'jira', name: 'Jira', color: '#0c66e4', desc: 'Search issues and projects' },
-  { id: 'microsoft-teams', name: 'Microsoft Teams', color: '#5059c9', desc: 'Search chats and channels' },
-  { id: 'sharepoint', name: 'SharePoint & OneDrive', color: '#036c70', desc: 'Search files and sites' },
-  { id: 'gmail', name: 'Gmail', color: '#ea4335', desc: 'Search your inbox' },
-  { id: 'linear', name: 'Linear', color: '#5e6ad2', desc: 'Search issues and projects' },
-];
-
 export function LitAISection() {
-  const [tab, setTab] = useState<'general' | 'connectors' | 'agents' | 'skills'>('general');
+  const [tab, setTab] = useState<'general' | 'agents' | 'skills'>('general');
   const prefs = usePrefs();
-  // workspace AI settings are the owners' (membership admins manage members and groups only, server: policy.ts)
-  const { space, owner: admin } = useSpaceAccess();
   const instructionsPage = prefs.ai_instructions_page as string | undefined;
   const page = instructionsPage ? records.get<BlockRecord>('block', instructionsPage) : undefined;
 
@@ -96,7 +69,7 @@ export function LitAISection() {
   };
 
   return (
-    <SectionPage title={t('lp.settings.litpage_ai', 'Litpage AI')} subtitle={t('lp.settings.configure_ai_features_to_suit_you', 'Configure AI features to suit you and manage connectors')}>
+    <SectionPage title={t('lp.settings.litpage_ai', 'Litpage AI')} subtitle={t('lp.settings.configure_ai_features_to_suit_you', 'Configure AI features to suit you')}>
       {/* tab pills, then the tab body 44px below */}
       <div className="nc-set-ai-sec">
       <Pills
@@ -104,17 +77,6 @@ export function LitAISection() {
         onChange={setTab}
         items={[
           { value: 'general', label: t('lp.settings.general', 'General') },
-          {
-            value: 'connectors',
-            label: t('lp.settings.ai_connectors', 'AI connectors'),
-            icon: (
-              <span className="nc-set-pill-logos" aria-hidden>
-                <span><i style={{ background: '#4a154b' }}>S</i></span>
-                <span><i style={{ background: '#1f2328' }}>G</i></span>
-                <span><i style={{ background: '#1a73e8' }}>D</i></span>
-              </span>
-            ),
-          },
           { value: 'agents', label: t('lp.settings.agents', 'Agents') },
           { value: 'skills', label: t('lp.settings.skills', 'Skills') },
         ]}
@@ -173,42 +135,6 @@ export function LitAISection() {
           {/* Image generation (features/aiImage) */}
           <ImageGenerationSettings />
         </div>
-      )}
-      {tab === 'connectors' && (
-        <Group
-          plain
-          title={t('lp.settings.workspace_ai_connections', 'Workspace AI connections')}
-          description={t('lp.settings.workspace_owners_can_connect_the_tools', 'Workspace owners can connect the tools their teams use for work.')}
-        >
-          <div className="nc-set-grid two">
-            {AI_CONNECTORS.map((c) => {
-              const connected = spaceSetting<string[]>(space, 'ai_connectors', []).includes(c.id);
-              return (
-                <div key={c.id} className="nc-set-conn">
-                  <span className="nc-set-conn-logo sm" style={{ background: c.color }}>{c.name.slice(0, 1)}</span>
-                  <div className="nc-set-conn-main">
-                    <div className="nc-set-conn-name">{c.name}{connected && <Badge tone="gray">{t('lp.settings.connected', 'Connected')}</Badge>}</div>
-                    <div className="nc-set-conn-desc">{c.desc}</div>
-                  </div>
-                  <span data-tooltip={admin ? undefined : t('lp.settings.this_connection_needs_an_admin_to', 'This connection needs an admin to turn it on')}>
-                    <Button
-                      small
-                      disabled={!admin || !space}
-                      onClick={() => {
-                        if (!space) return;
-                        const list = spaceSetting<string[]>(space, 'ai_connectors', []);
-                        if (connected) saveSpaceSettings(space.id, { ai_connectors: list.filter((x) => x !== c.id) });
-                        else stub(c.name);
-                      }}
-                    >
-                      {connected ? t('lp.settings.disconnect', 'Disconnect') : t('lp.settings.connect', 'Connect')}
-                    </Button>
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        </Group>
       )}
       {tab === 'skills' && (
         <Group
@@ -312,12 +238,7 @@ export function MeetingNotesSection() {
           id="transcript-deletion"
           label={t('lp.settings.delete_transcripts_automatically', 'Delete transcripts automatically')}
           description={!planAtLeast(plan, 'enterprise')
-            ? <Upsell
-                text={admin
-                  ? msg('lp.settings.upgrade_to_choose_when_transcripts_are', '<highlight>Upgrade</highlight> to choose when transcripts are deleted automatically.')
-                  : msg('lp.settings.request_access_to_choose_when_transcript', '<highlight>Request access</highlight> to choose when transcripts are deleted automatically')}
-                onClick={admin ? undefined : () => void requestUpgrade(space.id, 'enterprise')}
-              />
+            ? <Upsell text={msg('lp.settings.upgrade_to_choose_when_transcripts_are', '<highlight>Upgrade</highlight> to choose when transcripts are deleted automatically.')} />
             : undefined}
           control={(
             <Dropdown
@@ -590,7 +511,7 @@ function AddMcpClientBody({ close, onAdd }: { close: () => void; onAdd: (c: McpC
 // ---------------------------------------------------------------------------------------------- Verified pages
 
 export function VerifiedPagesSection() {
-  const { space, plan, owner } = useSpaceAccess();
+  const { space, plan } = useSpaceAccess();
   if (!space) return null;
   const business = planAtLeast(plan, 'business');
   const emptyState = (
@@ -601,10 +522,7 @@ export function VerifiedPagesSection() {
           <div className="sub">{t('lp.settings.no_verified_pages_yet_open_a', 'No verified pages yet. Open a page’s ••• menu and choose Verify to mark it as up to date.')}</div>
         ) : (
           <>
-            <div className="sub">{t('lp.settings.verify_any_page_by_upgrading_to', 'Verify any page by upgrading to the Business plan')}</div>
-            <Button className="big" icon="arrowInCircleUpAnimated" onClick={() => (owner ? useUI.getState().set({ settingsSection: 'plans' }) : void requestUpgrade(space.id, 'business'))}>
-              {owner ? t('lp.settings.upgrade', 'Upgrade') : t('lp.settings.request', 'Request')}
-            </Button>
+            <div className="sub">{t('lp.settings.verify_any_page_at_the_business', 'Verifying pages is available at the Business feature level')}</div>
           </>
         )}
       </div>

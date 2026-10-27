@@ -62,7 +62,7 @@ try {
   await page.click('.nc-cover-controls .nc-cover-btn:text-is("Change")');
   await page.waitForSelector('.nc-cover-picker');
   const ctabs = await page.$$eval('.nc-cover-picker [role=tab]', (els) => els.map((e) => e.textContent.trim()));
-  check('cover picker tabs', ctabs.join('|') === 'Gallery|Upload|Link|Unsplash', ctabs.join('|'));
+  check('cover picker tabs', ctabs.join('|') === 'Gallery|Upload|Link', ctabs.join('|'));
   await page.waitForTimeout(300);
   const cp = await rect('.nc-cover-picker');
   check('cover picker 540×485', cp.w === 540 && cp.h === 485, JSON.stringify(cp));

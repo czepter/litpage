@@ -547,7 +547,7 @@ try {
     await slash('image');
     await wait(400);
     const pop = page.locator('.nc-media-picker').last();
-    check('image: popover with Upload | Link | Unsplash | GIPHY', (await pop.locator('[role=tab]').allInnerTexts()).join('|') === 'Upload|Link|Unsplash|GIPHY');
+    check('image: popover with Upload | Link', (await pop.locator('[role=tab]').allInnerTexts()).join('|') === 'Upload|Link');
     check('image: popover 540px wide', Math.round((await pop.boundingBox()).width) === 540);
     await shot('image-popover');
     // a generated 600×300 PNG

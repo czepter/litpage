@@ -85,7 +85,7 @@ try {
     const picker = page.locator('.nc-media-picker');
     await picker.waitFor();
     const tabs = await picker.locator('[role="tab"]').allInnerTexts();
-    r.ok(tabs.join('|') === 'Upload|Link|Unsplash|GIPHY|Litpage AI', 'image picker tabs include Litpage AI', tabs);
+    r.ok(tabs.join('|') === 'Upload|Link|Litpage AI', 'image picker tabs include Litpage AI', tabs);
     await picker.locator('[role="tab"]', { hasText: 'Litpage AI' }).click();
     const form = page.locator('[data-testid="ai-image-tab"]');
     await form.waitFor();
@@ -138,8 +138,9 @@ try {
     await page.keyboard.press('Enter');
     const picker = page.locator('.nc-media-picker');
     await picker.waitFor();
-    await picker.locator('[role="tab"]', { hasText: 'Unsplash' }).click();
-    await picker.locator('.nc-stock-item').first().click();
+    await picker.locator('[role="tab"]', { hasText: 'Link' }).click();
+    await picker.locator('input').fill(`${h.base}/favicon.svg`);
+    await picker.locator('button', { hasText: 'Embed image' }).click();
     await waitFor(() => images().count().then((n) => n >= 2), { timeout: 8000 });
     await images().nth(1).hover();
     await page.locator('.nc-aiimg-edit-btn').last().click();

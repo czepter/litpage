@@ -10,7 +10,6 @@ import { isSpaceAdmin, teamAccessType, teamMembership } from '@nc/shared/permiss
 import { useCurrentSpace, useCurrentSpaceView, useRecords, useTableVersion } from '../../../lib/hooks.ts';
 import { records } from '../../../lib/store/records.ts';
 import { useSession } from '../../../lib/store/session.ts';
-import { useUI } from '../../../lib/store/ui.ts';
 import { navigate, spaceDomain, useLocation } from '../../../lib/router.ts';
 import { api } from '../../../lib/api.ts';
 import { Icon } from '../../../components/Icon.tsx';
@@ -264,8 +263,6 @@ function ViewAllRowFor({ section }: { section: SidebarSection }) {
 // ---------------- section bodies ----------------
 export function SectionView({ section }: { section: SidebarSection }) {
   switch (section.type) {
-    case 'upcoming_events':
-      return <UpcomingEventsSection section={section} />;
     case 'recents':
       return <RecentsSection section={section} />;
     case 'favorites':
@@ -299,21 +296,6 @@ export function SectionView({ section }: { section: SidebarSection }) {
 
 function limitOf(section: SidebarSection) {
   return section.limit ?? DEFAULT_LIMIT[section.type] ?? 5;
-}
-
-function UpcomingEventsSection({ section }: { section: SidebarSection }) {
-  return (
-    <SectionShell section={section}>
-      <div className="nc-sb-tree">
-        <div role="button" className="nc-sb-row" onClick={() => useUI.getState().openSettings('mail-calendar')}>
-          <div className="nc-sb-row-inner">
-            <div className="nc-sb-row-icon"><Icon name="calendarConnect" size={20} /></div>
-            <div className="nc-sb-row-label" style={{ fontWeight: 400 }}>{t('lp.shell.link_your_calendar', 'Link your calendar')}</div>
-          </div>
-        </div>
-      </div>
-    </SectionShell>
-  );
 }
 
 function RecentsSection({ section }: { section: SidebarSection }) {

@@ -147,14 +147,6 @@ a.nc-mkt-hero:hover .nc-mkt-explore, a.nc-mkt-hero:hover .nc-mkt-explore.bottom 
 .nc-mkt-tags { display: flex; gap: 6px; margin-top: 16px; flex-wrap: wrap; }
 .nc-mkt-tag { font-size: 12px; padding: 2px 8px; border-radius: 9999px; background: var(--lp-gray-bg-secondary-transparent); color: var(--lp-text-secondary); }
 .nc-mkt-detail-preview { height: min(70vh, 680px); border-radius: 12px; overflow: hidden; box-shadow: 0 0 0 1px var(--lp-border-primary), var(--lp-shadow-outset-medium); display: flex; }
-.nc-mkt-listing-desc { color: var(--lp-text-secondary); font-size: 15px; margin: -8px 0 20px; }
-.nc-mkt-listing { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
-@media (max-width: 900px) { .nc-mkt-listing { grid-template-columns: minmax(0, 1fr); } }
-.nc-mkt-listing-card { border-radius: 12px; padding: 20px; box-shadow: var(--lp-shadow-outset-small); background: var(--lp-bg-elevated); cursor: pointer; display: flex; flex-direction: column; gap: 6px; }
-.nc-mkt-listing-card:hover { box-shadow: var(--lp-shadow-outset-medium); }
-.nc-mkt-listing-icon { font-size: 28px; }
-.nc-mkt-listing-name { font-size: 15px; font-weight: 600; }
-.nc-mkt-listing-text { font-size: 13px; color: var(--lp-text-secondary); line-height: 18px; }
 
 /* live preview */
 .nc-tpreview { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--lp-bg-primary); }

@@ -171,6 +171,8 @@ export function openCoverPicker(anchor: Anchor, page: BlockRecord, onClose?: () 
 
 type CoverTab = 'gallery' | 'upload' | 'link' | 'unsplash' | 'ai';
 
+const UNSPLASH_KEY = (import.meta as any).env?.VITE_UNSPLASH_ACCESS_KEY as string | undefined;
+
 function CoverPicker({ page, close }: { page: BlockRecord; close: () => void }) {
   const [tab, setTab] = useState<CoverTab>('gallery');
   const [url, setUrl] = useState('');
@@ -210,7 +212,8 @@ function CoverPicker({ page, close }: { page: BlockRecord; close: () => void }) 
     ['gallery', t('lp.page.gallery', 'Gallery')],
     ['upload', t('lp.page.upload', 'Upload')],
     ['link', t('lp.page.link', 'Link')],
-    ['unsplash', 'Unsplash'],
+    // Unsplash: only with an API access key (VITE_UNSPLASH_ACCESS_KEY)
+    ...(UNSPLASH_KEY ? [['unsplash', 'Unsplash'] as [CoverTab, string]] : []),
     // Litpage AI: a generated cover, where the workspace can generate images (plan + Settings › Litpage AI)
     ...aiImageTabs(page).map((k): [CoverTab, string] => [k, t('lp.page.litpage_ai', 'Litpage AI')]),
   ];
@@ -281,7 +284,7 @@ function CoverPicker({ page, close }: { page: BlockRecord; close: () => void }) 
 }
 
 function UnsplashTab({ onPick }: { onPick: (url: string) => void }) {
-  const key = (import.meta as any).env?.VITE_UNSPLASH_ACCESS_KEY as string | undefined;
+  const key = UNSPLASH_KEY;
   const [q, setQ] = useState('');
   const [results, setResults] = useState<{ id: string; thumb: string; full: string; author: string }[]>([]);
   useEffect(() => {
@@ -299,9 +302,6 @@ function UnsplashTab({ onPick }: { onPick: (url: string) => void }) {
     }, 250);
     return () => clearTimeout(h);
   }, [q, key]);
-  if (!key) {
-    return <div className="nc-unsplash-note">Unsplash search needs an API access key.<br />Set <code>VITE_UNSPLASH_ACCESS_KEY</code> to enable it — or pick from the Gallery, upload a file, or paste a link.</div>;
-  }
   return (
     <div>
       <div className="nc-picker-filter" style={{ marginBottom: 12 }}>

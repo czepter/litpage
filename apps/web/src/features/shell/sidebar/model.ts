@@ -16,7 +16,7 @@ export type ShortcutType =
   | 'settings' | 'meeting_notes' | 'skills' | 'my_tasks' | 'lit_calendar' | 'marketplace';
 
 export type SectionType =
-  | 'upcoming_events' | 'recents' | 'favorites' | 'teamspaces' | 'shared' | 'private'
+  | 'recents' | 'favorites' | 'teamspaces' | 'shared' | 'private'
   | 'chats' | 'pinned_chats' | 'agents' | 'ai_meeting_notes' | 'lit_apps' | 'developer' | 'teamspace' | 'database_view';
 
 export interface SidebarShortcut {
@@ -69,7 +69,6 @@ export function defaultLayout(): SidebarLayout {
         id: 'home', icon: 'home',
         shortcuts: [{ id: 'sc-new-chat', type: 'new_chat' }, { id: 'sc-library', type: 'library' }],
         sections: [
-          { id: 'sec-upcoming', type: 'upcoming_events', limit: 5 },
           { id: 'sec-recents', type: 'recents', limit: 5 },
           { id: 'sec-favorites', type: 'favorites', limit: 100 },
           { id: 'sec-teamspaces', type: 'teamspaces', limit: 5 },
@@ -81,7 +80,7 @@ export function defaultLayout(): SidebarLayout {
       {
         id: 'meetings', icon: 'meetings',
         shortcuts: [{ id: 'sc-new-meeting', type: 'new_meeting_note' }],
-        sections: [{ id: 'sec-meet-upcoming', type: 'upcoming_events', limit: 5 }],
+        sections: [{ id: 'sec-meet-notes', type: 'ai_meeting_notes', limit: 5 }],
       },
     ],
   };
@@ -99,7 +98,8 @@ function normalize(raw: unknown): SidebarLayout | null {
       name: t.name || undefined,
       presetId: typeof t.presetId === 'string' ? t.presetId : undefined,
       shortcuts: Array.isArray(t.shortcuts) ? t.shortcuts.filter((s) => s && s.type) : [],
-      sections: Array.isArray(t.sections) ? t.sections.filter((s) => s && s.type) : [],
+      // upcoming_events: calendar sections from layouts saved before calendar linking was removed
+      sections: Array.isArray(t.sections) ? t.sections.filter((s) => s && s.type && (s.type as string) !== 'upcoming_events') : [],
     })),
   };
 }

@@ -251,7 +251,7 @@ export function useApplyUserSettings() {
     if (legacyOptOut) savePrefs({ page_view_history: 'deny' });
   }, [legacyOptOut]);
 
-  // deep links: /<domain>?target=billing | imports | ai | developer | notifications | mcp | connected_apps …
+  // deep links: /<domain>?target=imports | ai | developer | notifications | mcp | connected_apps …
   useEffect(() => {
     openSettingsFromUrl();
   }, []);
@@ -273,12 +273,12 @@ export function useApplyUserSettings() {
 
 /** `?target=` deep links → settings sections (the param is removed after opening). */
 const TARGETS: Record<string, string> = {
-  billing: 'billing', plans: 'plans', upgrade: 'plans', imports: 'import', import: 'import', ai: 'lit-ai', lit_ai: 'lit-ai',
+  imports: 'import', import: 'import', ai: 'lit-ai', lit_ai: 'lit-ai',
   developer: 'developers', developers: 'developers', notifications: 'notifications', mcp: 'lit-mcp', 'integrations_mcp.settings': 'lit-mcp',
   connected_apps: 'connections', connections: 'connections', integrations: 'connections', members: 'members', people: 'members',
   security: 'security', identity: 'identity', general: 'general', account: 'account', preferences: 'preferences', emoji: 'emoji',
   sites: 'public-pages', public_pages: 'public-pages', teamspaces: 'teamspaces', audit_log: 'audit-log', analytics: 'analytics',
-  content_search: 'content-search', sidebar: 'sidebar', requests: 'requests', meeting_notes: 'meeting-notes', mail_calendar: 'mail-calendar',
+  content_search: 'content-search', sidebar: 'sidebar', requests: 'requests', meeting_notes: 'meeting-notes',
 };
 
 export function openSettingsFromUrl() {

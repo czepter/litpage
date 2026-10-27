@@ -102,7 +102,7 @@ export function AgentsAdmin() {
     .filter((a) => !statuses.length || statuses.includes(a.status)), [data, q, statuses]);
   if (!space) return null;
   if (!data?.available && data) {
-    return <Upsell text={t('lp.agents.using_this_agent_requires_an_upgrade', 'Using this agent requires an upgrade to {productName}', { productName: 'Business' }).replace('this agent', 'Custom Agents')} onClick={() => useUI.getState().openSettings('plans')} />;
+    return <Upsell text={t('lp.agents.using_this_agent_requires_an_upgrade', 'Using this agent requires an upgrade to {productName}', { productName: 'Business' }).replace('this agent', 'Custom Agents')} />;
   }
   return (
     <div className="nc-agents-admin" data-testid="agents-admin">

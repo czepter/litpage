@@ -1,7 +1,8 @@
 // Settings modal ("Settings & members"): left nav (Search settings + Account / Workspace / Features /
-// Access & billing groups) and the selected section. Search settings matches tab names and individual settings
+// Admin groups) and the selected section. Search settings matches tab names and individual settings
 // (searchIndex.ts: result location "Workspace / General", picking one scrolls to the row and flashes it).
-// Admin-only sections (Teamspaces, Security, Identity, Requests, Billing) are shown to workspace admins only.
+// Admin-only sections (Teamspaces, Security, Identity, Requests) are shown to workspace admins only.
+// Feature levels are set for the install with NC_FEATURE_LEVEL (server featureLevel.ts), so there is no plans page.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { isSpaceAdmin } from '@nc/shared/permissions.ts';
@@ -16,21 +17,20 @@ import './icons.ts';
 import './settings.css';
 import { AccountSection } from './sections/account.tsx';
 import { PreferencesSection } from './sections/preferences.tsx';
-import { NotificationsSection, MailCalendarSection } from './sections/notifications.tsx';
+import { NotificationsSection } from './sections/notifications.tsx';
 import { GeneralSection, TeamspacesSection, SecuritySection, IdentitySection, RequestsSection } from './sections/workspace.tsx';
 import { PeopleSection } from './sections/people.tsx';
 import { ImportSection, LitAISection, MeetingNotesSection, LitMcpSection, VerifiedPagesSection, PublicPagesSection, DeveloperSection } from './sections/features.tsx';
 import { ConnectionsSection } from './sections/connections.tsx';
 import { EmojiSection } from './sections/emoji.tsx';
-import { PlansSection, BillingSection } from './sections/plans.tsx';
 import { AnalyticsSection, AuditLogSection, ContentSearchSection } from './sections/admin.tsx';
 import { SidebarPresetsSection } from './sections/sidebarPresets.tsx';
 
 export type SettingsKey =
-  | 'account' | 'preferences' | 'notifications' | 'mail-calendar'
+  | 'account' | 'preferences' | 'notifications'
   | 'general' | 'members' | 'teamspaces' | 'sidebar' | 'security' | 'identity' | 'analytics' | 'audit-log' | 'content-search' | 'import'
   | 'lit-ai' | 'meeting-notes' | 'connections' | 'lit-mcp' | 'verified-pages' | 'public-pages' | 'emoji' | 'developers'
-  | 'requests' | 'billing' | 'plans';
+  | 'requests';
 
 interface NavItem {
   key: SettingsKey;
@@ -54,8 +54,7 @@ function navGroups(): { title: string; items: NavItem[] }[] {
       items: [
         { key: 'account', label: '', icon: 'avatar', keywords: ['account', 'profile', 'name', 'photo', 'email', 'password', 'passkey', 'two-factor', 'devices', 'log out', 'close account', 'support access', 'user id'] },
         { key: 'preferences', label: t('lp.settings.preferences', 'Preferences'), icon: 'sliders', keywords: ['theme', 'dark', 'light', 'appearance', 'contrast', 'language', 'number format', 'date format', 'time zone', 'week starts monday', 'launch at startup', 'start page', 'cookie', 'view history', 'desktop app', 'enter'] },
-        { key: 'notifications', label: t('lp.settings.notifications', 'Notifications'), icon: 'bell', keywords: ['email', 'slack', 'discord', 'teams', 'digest', 'meeting'] },
-        { key: 'mail-calendar', label: t('lp.settings.mail_calendar', 'Mail & Calendar'), icon: 'envelope', keywords: ['mail', 'calendar', 'email'] },
+        { key: 'notifications', label: t('lp.settings.notifications', 'Notifications'), icon: 'bell', keywords: ['email', 'digest', 'meeting'] },
       ],
     },
     {
@@ -76,6 +75,7 @@ function navGroups(): { title: string; items: NavItem[] }[] {
         { key: 'analytics', label: t('lp.settings.analytics', 'Analytics'), icon: 'chartLine', admin: true, enterpriseMembers: true, keywords: ['workspace analytics', 'page views', 'search'] },
         { key: 'audit-log', label: t('lp.settings.audit_log', 'Audit log'), icon: 'auditLog', owner: true, keywords: ['audit', 'events', 'log'] },
         { key: 'content-search', label: t('lp.settings.content_search', 'Content search'), icon: 'contentSearch', owner: true, keywords: ['content search', 'retained pages'] },
+        { key: 'requests', label: t('lp.settings.requests', 'Requests'), icon: 'inboxArrowDown', admin: true, keywords: ['member requests', 'invitation requests'] },
       ],
     },
     {
@@ -91,20 +91,12 @@ function navGroups(): { title: string; items: NavItem[] }[] {
         { key: 'developers', label: t('lp.settings.developer', 'Developer'), icon: 'curlyBraces', keywords: ['token', 'api', 'developer mode'] },
       ],
     },
-    {
-      title: t('lp.settings.access_billing', 'Access & billing'),
-      items: [
-        { key: 'requests', label: t('lp.settings.requests', 'Requests'), icon: 'inboxArrowDown', admin: true, keywords: ['upgrade requests'] },
-        { key: 'billing', label: t('lp.settings.billing', 'Billing'), icon: 'creditCard', owner: true, keywords: ['invoice', 'payment'] },
-        { key: 'plans', label: t('lp.settings.explore_plans', 'Explore plans'), icon: 'map', keywords: ['plan', 'upgrade', 'plus', 'business', 'enterprise'] },
-      ],
-    },
   ];
 }
 
 const ADMIN_FALLBACK: Partial<Record<SettingsKey, SettingsKey>> = {
   teamspaces: 'general', sidebar: 'general', security: 'general', identity: 'general', analytics: 'general', 'audit-log': 'general', 'content-search': 'general',
-  requests: 'plans', billing: 'plans',
+  requests: 'general',
 };
 
 export interface NavAccess { admin: boolean; owner: boolean; enterprise: boolean }
@@ -118,7 +110,7 @@ function visible(it: NavItem, a: NavAccess): boolean {
 export function normalizeSettingsKey(raw: string, access: boolean | NavAccess): SettingsKey {
   const a: NavAccess = typeof access === 'boolean' ? { admin: access, owner: access, enterprise: false } : access;
   const alias: Record<string, SettingsKey> = {
-    people: 'members', 'my-account': 'account', developer: 'developers', ai: 'lit-ai', mcp: 'lit-mcp', sites: 'public-pages', upgrade: 'plans',
+    people: 'members', 'my-account': 'account', developer: 'developers', ai: 'lit-ai', mcp: 'lit-mcp', sites: 'public-pages',
     audit: 'audit-log', auditlog: 'audit-log', 'workspace-analytics': 'analytics', 'admin-content-search': 'content-search',
   };
   const k = (alias[raw] ?? raw) as SettingsKey;
@@ -209,7 +201,6 @@ export function SettingsModal() {
     case 'account': body = <AccountSection />; break;
     case 'preferences': body = <PreferencesSection />; break;
     case 'notifications': body = <NotificationsSection />; break;
-    case 'mail-calendar': body = <MailCalendarSection />; break;
     case 'general': body = <GeneralSection />; break;
     case 'members': body = <PeopleSection />; break;
     case 'teamspaces': body = <TeamspacesSection />; break;
@@ -229,8 +220,6 @@ export function SettingsModal() {
     case 'emoji': body = <EmojiSection />; break;
     case 'developers': body = <DeveloperSection />; break;
     case 'requests': body = <RequestsSection />; break;
-    case 'billing': body = <BillingSection />; break;
-    case 'plans': body = <PlansSection />; break;
   }
 
   return createPortal(

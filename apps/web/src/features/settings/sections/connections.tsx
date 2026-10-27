@@ -1,63 +1,19 @@
-// Settings › Connections: a small, searchable catalog of services and the workspace connection controls.
-import { useEffect, useMemo, useState } from 'react';
+// Settings › Connections: the connections this build supports (personal MCP servers, Litpage MCP, the developer
+// platform) and the workspace connection controls.
+import { useEffect, useState } from 'react';
 import type { SpaceRecord, UserRecord } from '@nc/shared/records.ts';
 import { api } from '../../../lib/api.ts';
 import { records } from '../../../lib/store/records.ts';
 import { useUI } from '../../../lib/store/ui.ts';
-import { Icon } from '../../../components/Icon.tsx';
-import { openMenu } from '../../../components/Menu.tsx';
 import { t } from '../../shell/i18n.ts';
 import { Button, Group, Row, SectionPage, Switch, Upsell, UserAvatar, confirmDialog, msg, openSubDialog, rich } from '../ui.tsx';
 import { planAtLeast, saveSpaceSettings, spaceSetting, useSpaceAccess } from '../spaceSettings.ts';
 import { fmtDate } from './workspace.tsx';
 import { useSettingsFocus } from '../searchIndex.ts';
 import '../admin.css';
-import { CATEGORY_OPTIONS, CONNECTION_CATEGORIES, TYPE_OPTIONS, type ConnectionCard } from '../data/connections.ts';
 import { ApiConnectionsManage } from '../../developer/ManageConnections.tsx';
 import { openDevelopers } from '../../developer/api.ts';
 import { WorkspaceSharedMcps } from '../../ai/WorkspaceMcps.tsx';
-
-const BRAND: Record<string, string> = {
-  'Google Calendar': '#1a73e8', 'Microsoft Teams': '#5059c9', Outlook: '#0a64c8', Salesforce: '#00a1e0', Asana: '#f06a6a', Atlassian: '#0c66e4',
-  Gmail: '#ea4335', Slack: '#4a154b', Discord: '#5865f2', DeepL: '#0f2b46', Zoom: '#0b5cff', iCloud: '#3693f3', Calendly: '#006bff',
-  Box: '#0061d5', 'Google Drive': '#1fa463', 'SharePoint & OneDrive': '#036c70', Dropbox: '#0061fe', Coda: '#f46a54', Linear: '#5e6ad2',
-  ClickUp: '#7b68ee', Trello: '#0c66e4', 'monday.com': '#ff3d57', Figma: '#a259ff', Canva: '#00c4cc', GitHub: '#1f2328', GitLab: '#fc6d26',
-  PagerDuty: '#06ac38', Amplitude: '#1e61f0', Zendesk: '#03363d', Intercom: '#1f8ded', Wiz: '#1a32ff', Make: '#6d00cc', Zapier: '#ff4f00',
-};
-const PALETTE = ['#818cf8', '#a78bfa', '#fb923c', '#0f7b6c', '#e03e3e', '#0ea5e9', '#f472b6', '#64473a', '#34d399', '#fbbf24'];
-
-function brandColor(name: string): string {
-  if (BRAND[name]) return BRAND[name];
-  let h = 0;
-  for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  return PALETTE[h % PALETTE.length];
-}
-
-function Logo({ name, size = 40 }: { name: string; size?: number }) {
-  return (
-    <span className="nc-set-clogo" style={{ width: size, height: size, background: brandColor(name), fontSize: size * 0.42 }} aria-hidden>
-      {name === 'New MCP link' ? <Icon name="plus" size={size * 0.5} /> : name.replace(/[^\p{L}\p{N}]/gu, '').slice(0, 1).toUpperCase()}
-    </span>
-  );
-}
-
-const AI_CONNECTOR = new Set(['Slack', 'Google Drive', 'GitHub', 'Linear']);
-const AUTOMATION = new Set(['Slack', 'Gmail', 'Zapier', 'Make']);
-
-function typesOf(c: ConnectionCard): string[] {
-  const out: string[] = [];
-  if (!c.litpage) out.push('mcp_server');
-  if (AI_CONNECTOR.has(c.name)) out.push('ai_connector');
-  if (AUTOMATION.has(c.name)) out.push('automation_action');
-  if (c.litpage) out.push('link_preview');
-  return out;
-}
-
-const ALL_CARDS: ConnectionCard[] = (() => {
-  const seen = new Map<string, ConnectionCard>();
-  for (const c of CONNECTION_CATEGORIES) for (const card of c.cards) if (!seen.has(card.name)) seen.set(card.name, card);
-  return [...seen.values()];
-})();
 
 /** "Personal MCP server" (Add connection menu / Developer connections): features/ai's Add custom MCP server dialog,
  *  when Connections › Manage › Turn on custom MCP servers is on (space.settings.ai_custom_mcp). */
@@ -78,162 +34,44 @@ export function ConnectionsSection() {
   useEffect(() => {
     if (focus.section === 'connections' && (focus.tab === 'manage' || focus.tab === 'browse')) setTab(focus.tab);
   }, [focus.nonce]); // eslint-disable-line react-hooks/exhaustive-deps
-  const [q, setQ] = useState('');
-  const [cat, setCat] = useState<string>('all');
-  const [type, setType] = useState<string>('all');
-
-  const connect = (c: ConnectionCard) => {
-    useUI.getState().toast(c.action === 'Request'
-      ? t('lp.settings.needs_a_workspace_owner_s_approval', '{name} needs a workspace owner’s approval, and connecting it isn’t available in this build', { name: c.name })
-      : t('lp.settings.connecting_needs_signing_in_to_which', 'Connecting {name} needs signing in to {name}, which isn’t available in this build', { name: c.name }));
-  };
-
-  const needle = q.trim().toLowerCase();
-  const typeOk = (c: ConnectionCard) => type === 'all' || typesOf(c).includes(type);
-  const results = useMemo(
-    () => (needle ? ALL_CARDS.filter((c) => (c.name.toLowerCase().includes(needle) || c.desc.toLowerCase().includes(needle)) && typeOk(c)) : []),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [needle, type],
-  );
-
-  const catLabel = cat === 'all' ? t('lp.settings.all_categories', 'All categories') : CATEGORY_OPTIONS.find((c) => c.key === cat)?.title ?? cat;
-  const typeLabel = type === 'all' ? t('lp.settings.all_types', 'All types') : TYPE_OPTIONS.find((c) => c.key === type)?.title ?? type;
-
-  const filterMenu = (anchor: HTMLElement, items: { key: string; title: string; count?: number }[], cur: string, onPick: (k: string) => void) => {
-    anchor.classList.add('open');
-    openMenu(anchor, {
-      width: 260,
-      maxHeight: 420,
-      sections: [{
-        items: items.map((it) => ({
-          label: it.title,
-          checked: it.key === cur,
-          right: it.count !== undefined ? <span className="nc-set-menu-count">{it.count}</span> : undefined,
-          onSelect: () => onPick(it.key),
-        })),
-      }],
-    }, { placement: 'bottom-start', onClose: () => anchor.classList.remove('open') });
-  };
-
-  const card = (c: ConnectionCard, key: string) => (
-    <div
-      key={key}
-      role="button"
-      tabIndex={0}
-      className="nc-set-ccard"
-      aria-label={`${c.action === 'Request' ? t('lp.settings.request', 'Request') : t('lp.settings.connect', 'Connect')} ${c.name}`}
-      onClick={() => connect(c)}
-      onKeyDown={(e) => { if (e.key === 'Enter') connect(c); }}
-    >
-      <span className="logo-box"><Logo name={c.name} size={40} /></span>
-      <div className="main">
-        <div className="nm-row">
-          <div className="nm" title={c.name}>{c.name}</div>
-          {c.litpage && (
-            <span className="built" data-tooltip={t('lp.settings.built_and_maintained_by_litpage', 'Built and maintained by Litpage')}>
-              <Icon name="badgeCheck" size={12} />
-              <span>{t('lp.settings.made_by_litpage', 'Built by Litpage')}</span>
-            </span>
-          )}
-        </div>
-        <div className="ds" title={c.desc}>{c.desc}</div>
-      </div>
-      <span className="act" aria-hidden>{c.action === 'Request' ? t('lp.settings.request', 'Request') : t('lp.settings.connect', 'Connect')}</span>
-    </div>
-  );
-
-  const categories = CONNECTION_CATEGORIES.filter((c) => cat === 'all' || c.key === cat);
-
   return (
     <SectionPage
       title={t('lp.settings.connections', 'Connections')}
       subtitle={
         <span className="nc-set-balanced">
-          {t('lp.settings.connect_services_to_use_in_litpage', 'Connect services to use in Litpage. Search, sync, and automate work across the tools your team already uses.')}
+          {t('lp.settings.connect_litpage_with_mcp_servers_and', 'Connect Litpage with MCP servers and your own integrations.')}
         </span>
       }
     >
       <div className="nc-set-connections">
-        <div className="nc-set-pills" role="tablist">
-          <div role="tab" tabIndex={0} aria-selected={tab === 'browse'} className={`nc-set-pill big${tab === 'browse' ? ' selected' : ''}`} onClick={() => setTab('browse')}>{t('lp.settings.browse_connections', 'Browse Connections')}</div>
-          {owner && <div role="tab" tabIndex={0} aria-selected={tab === 'manage'} className={`nc-set-pill big${tab === 'manage' ? ' selected' : ''}`} onClick={() => setTab('manage')}>{t('lp.settings.manage', 'Manage')}</div>}
-        </div>
-        {tab === 'manage' && space && owner ? <ManageConnections space={space} /> : (<>
-        <div className="nc-set-conn-toolbar">
-          <div className="nc-set-input nc-set-conn-search">
-            <Icon name="magnifyingGlassSmall" size={16} />
-            <input aria-label={t('lp.settings.search_connections', 'Search connections')} placeholder={t('lp.settings.search_connections', 'Search connections')} value={q} onChange={(e) => setQ(e.target.value)} />
-            {q && <span role="button" className="nc-set-icon-btn" aria-label="Clear" onClick={() => setQ('')}><Icon name="xMarkSmall" size={14} /></span>}
+        {owner && (
+          <div className="nc-set-pills" role="tablist">
+            <div role="tab" tabIndex={0} aria-selected={tab === 'browse'} className={`nc-set-pill big${tab === 'browse' ? ' selected' : ''}`} onClick={() => setTab('browse')}>{t('lp.settings.add_connection', 'Add connection')}</div>
+            <div role="tab" tabIndex={0} aria-selected={tab === 'manage'} className={`nc-set-pill big${tab === 'manage' ? ' selected' : ''}`} onClick={() => setTab('manage')}>{t('lp.settings.manage', 'Manage')}</div>
           </div>
-          <div
-            role="button"
-            tabIndex={0}
-            aria-haspopup="dialog"
-            aria-label={`${t('lp.settings.filter_categories', 'Filter categories')}: ${catLabel}`}
-            className="nc-set-btn nc-set-dropdown nc-set-conn-filter"
-            onClick={(e) => filterMenu(e.currentTarget, [{ key: 'all', title: t('lp.settings.all_categories', 'All categories') }, ...CATEGORY_OPTIONS], cat, setCat)}
-          >
-            <span>{catLabel}</span><span className="chev"><Icon name="arrowChevronSingleDownSmall" size={16} /></span>
-          </div>
-          <div
-            role="button"
-            tabIndex={0}
-            aria-haspopup="dialog"
-            aria-label={`${t('lp.settings.filter_connection_types', 'Filter connection types')}: ${typeLabel}`}
-            className="nc-set-btn nc-set-dropdown nc-set-conn-filter"
-            onClick={(e) => filterMenu(e.currentTarget, [{ key: 'all', title: t('lp.settings.all_types', 'All types') }, ...TYPE_OPTIONS], type, setType)}
-          >
-            <span>{typeLabel}</span><span className="chev"><Icon name="arrowChevronSingleDownSmall" size={16} /></span>
-          </div>
-          <Button
-            variant="primary"
-            icon="plus"
-            onClick={(e) => openMenu(e.currentTarget, {
-              width: 260,
-              sections: [{
-                items: [
-                  { label: t('lp.settings.browse_all_connections', 'Browse all connections'), icon: 'squareGrid2X2', onSelect: () => { setQ(''); setCat('all'); setType('all'); } },
-                  { label: t('lp.settings.custom_mcp_server', 'Personal MCP server'), icon: 'integration', description: t('lp.settings.add_a_custom_mcp_server_connection', 'Add a custom MCP server connection'), onSelect: () => openCustomMcp(space, owner) },
-                  { label: t('lp.settings.develop_integrations', 'Develop integrations'), icon: 'curlyBraces', onSelect: () => { useUI.getState().set({ settingsOpen: false }); openDevelopers('connections'); } },
-                ],
-              }],
-            }, { placement: 'bottom-end' })}
-          >
-            {t('lp.settings.add_connection', 'Add connection')}
-            <Icon name="arrowChevronSingleDownSmall" size={14} />
-          </Button>
-        </div>
-
-        {needle ? (
-          <section className="nc-set-conn-cat">
-            <h2 className="nc-set-cat-title">{t('lp.settings.results', 'Results')}</h2>
-            {results.length ? <div className="nc-set-cgrid">{results.map((c) => card(c, c.name))}</div> : <div className="nc-set-empty">{t('lp.settings.no_connections_match', 'No connections match “{query}”', { query: q.trim() })}</div>}
-          </section>
-        ) : (
-          categories.map((c) => {
-            const cards = c.cards.filter(typeOk);
-            if (!cards.length) return null;
-            const title = c.title;
-            return (
-              <section key={c.key} className="nc-set-conn-cat" aria-label={title}>
-                <h2 className="nc-set-cat-title">{title}</h2>
-                <div className="nc-set-cgrid">{cards.map((x) => card(x, `${c.key}:${x.name}`))}</div>
-                {c.key === 'featured' && (
-                  <div className="nc-set-cmore-row">
-                    <div className="nc-set-mcp-hint">
-                      <span>{t('lp.settings.use_litpage_with_your_ai_tools', 'Use Litpage with your AI tools through a custom MCP connection:')}</span>
-                      <span role="button" tabIndex={0} className="nc-set-link strong" onClick={() => useUI.getState().set({ settingsSection: 'lit-mcp' })}>
-                        {t('lp.settings.litpage_mcp', 'Litpage MCP')}
-                        <Icon name="arrowStraightRightSmall" size={14} />
-                      </span>
-                    </div>
-                  </div>
-                )}
-              </section>
-            );
-          })
         )}
-        </>)}
+        {tab === 'manage' && space && owner ? <ManageConnections space={space} /> : (
+          <Group>
+            <Row
+              id="custom-mcp-server"
+              label={t('lp.settings.custom_mcp_server', 'Personal MCP server')}
+              description={t('lp.settings.add_a_custom_mcp_server_connection', 'Add a custom MCP server connection')}
+              control={<Button icon="integration" onClick={() => openCustomMcp(space, owner)}>{t('lp.settings.add', 'Add')}</Button>}
+            />
+            <Row
+              id="litpage-mcp"
+              label={t('lp.settings.litpage_mcp', 'Litpage MCP')}
+              description={t('lp.settings.use_litpage_with_your_ai_tools', 'Use Litpage with your AI tools through a custom MCP connection:').replace(/:$/, '')}
+              control={<Button onClick={() => useUI.getState().set({ settingsSection: 'lit-mcp' })}>{t('lp.settings.open', 'Open')}</Button>}
+            />
+            <Row
+              id="develop-integrations"
+              label={t('lp.settings.develop_integrations', 'Develop integrations')}
+              description={t('lp.settings.build_integrations_with_the_litpage_api', 'Build integrations with the Litpage API and webhooks')}
+              control={<Button icon="curlyBraces" onClick={() => { useUI.getState().set({ settingsOpen: false }); openDevelopers('connections'); }}>{t('lp.settings.open', 'Open')}</Button>}
+            />
+          </Group>
+        )}
       </div>
     </SectionPage>
   );
@@ -374,7 +212,7 @@ function ManageConnections({ space }: { space: SpaceRecord }) {
           description={(
             <>
               {rich(msg('lp.settings.decide_who_can_use_the_send', 'Decide who can use the <bold>Send webhook</bold> action in buttons and automations'), {}, { bold: (c) => <b>{c}</b> })}
-              {!enterprise && <Upsell text={msg('lp.settings.upgrade_to_block_database_automations_an', '<highlight>Upgrade</highlight> to block database automations and buttons from sending webhooks to third-party tools')} onClick={() => useUI.getState().set({ settingsSection: 'plans' })} />}
+              {!enterprise && <Upsell text={msg('lp.settings.upgrade_to_block_database_automations_an', '<highlight>Upgrade</highlight> to block database automations and buttons from sending webhooks to third-party tools')} />}
             </>
           )}
           control={<Switch label="Permit webhooks in automations" checked={webhooksOn} disabled={!enterprise} onChange={(v) => saveSpaceSettings(space.id, { disallow_webhook_automation_action: !v })} />}

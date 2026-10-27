@@ -24,10 +24,7 @@ function openWhenRendered(id: string, fallback: DOMRect, tries = 0) {
 function insertAiImage(ctx: SlashContext) {
   const spaceId = getBlock(ctx.blockId)?.space_id ?? useSession.getState().spaceId;
   if (!planIncludesImages(spaceId)) {
-    useUI.getState().toast(t('lp.aiimage.ai_image_generation_is_available_on', 'AI image generation is available on the Business and Enterprise plans.'), {
-      label: t('lp.aiimage.view_plans', 'View plans'),
-      run: () => useUI.getState().openSettings('plans'),
-    });
+    useUI.getState().toast(t('lp.aiimage.ai_image_generation_is_available_on', 'AI image generation is available at the Business and Enterprise feature levels.'));
     return;
   }
   const id = place(ctx, 'image', { focus: false, addTextAfter: false });
