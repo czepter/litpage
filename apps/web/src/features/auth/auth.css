@@ -76,7 +76,7 @@
 .nc-auth-divider { display: flex; align-items: center; justify-content: center; height: 21px; margin: 30px 0; pointer-events: none; }
 .nc-auth-divider .line { flex: 1 1 0%; min-width: 0; height: 1px; background-color: var(--lp-border-primary); }
 .nc-auth-divider .label { min-width: 0; margin-inline: 12px; max-width: 70%; text-align: center; color: var(--lp-text-tertiary); font-size: 14px; line-height: 20px; font-weight: 400; }
-.nc-auth-providers { display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
+.nc-auth-providers { display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr); width: 100%; }
 .nc-auth-provider {
   position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; height: 72px; border-radius: 6px;
   color: var(--lp-text-primary); padding-inline: 6px; font-weight: 500; min-width: 0; border: none; cursor: pointer; background: var(--lp-bg-primary);

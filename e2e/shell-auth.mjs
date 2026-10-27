@@ -21,7 +21,7 @@ try {
   await shot('01-login');
   ok(await page.locator('h1', { hasText: 'Your intelligent workspace' }).count() === 1, 'login title');
   ok(await page.locator('h2', { hasText: 'Sign in to keep working in Litpage' }).count() === 1, 'login subtitle');
-  ok(await page.locator('.nc-auth-provider').count() === 6, '6 provider buttons (Google/ChatGPT/Apple/Microsoft/Passkey/SSO)');
+  ok(await page.locator('.nc-auth-provider').count() === 1, 'one provider button (Passkey)');
   const cont = await page.locator('button[type=submit]').boundingBox();
   ok(cont && Math.round(cont.width) === 360 && Math.round(cont.height) === 40, `Continue 360×40 (got ${JSON.stringify(cont)})`);
   const prov = await page.locator('.nc-auth-provider').first().boundingBox();
@@ -40,7 +40,7 @@ try {
   await page.waitForTimeout(300);
   await shot('03-signup');
   ok(await page.locator('h1', { hasText: 'Litpage: a workspace with AI built in.' }).count() === 1, 'signup title');
-  ok(await page.locator('.nc-auth-provider').count() === 3, 'signup has 3 providers');
+  ok(await page.locator('.nc-auth-provider').count() === 0, 'signup has no providers');
   ok(await page.locator('.nc-auth-tip').count() === 1, 'signup tip box');
 
   // ---- email code flow (new account) + onboarding with "For work"

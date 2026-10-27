@@ -4,3 +4,5 @@
 for (const k of ['NC_AI_PROVIDER', 'OPENAI_BASE_URL', 'OPENAI_API_KEY', 'NC_AI_MODEL', 'NC_AI_FAST_MODEL', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL']) {
   delete process.env[k];
 }
+// Tests were written against workspaces created at the Pro level; they switch levels themselves where it matters.
+process.env.NC_FEATURE_LEVEL = 'pro';

@@ -23,8 +23,8 @@ import './templates.css';
 /** set by the topbar "Search" button: focus the template search once the Templates tab mounts */
 let focusSearchNext = false;
 
-type Tab = 'discover' | 'templates' | 'agents' | 'consultants' | 'skills' | 'connections';
-const TABS: Tab[] = ['discover', 'templates', 'agents', 'consultants', 'skills', 'connections'];
+type Tab = 'discover' | 'templates';
+const TABS: Tab[] = ['discover', 'templates'];
 
 function tabLabel(tab: Tab): string {
   switch (tab) {
@@ -32,14 +32,6 @@ function tabLabel(tab: Tab): string {
       return t('lp.templates.discover', 'Discover');
     case 'templates':
       return t('lp.templates.templates', 'Templates');
-    case 'agents':
-      return t('lp.templates.agents', 'Agents');
-    case 'consultants':
-      return t('lp.templates.consultants', 'Consultants');
-    case 'skills':
-      return t('lp.templates.skills', 'Skills');
-    case 'connections':
-      return t('lp.templates.connections', 'Connections');
   }
 }
 
@@ -76,7 +68,6 @@ export function MarketplacePage({ tab }: { tab?: string }) {
         if (active !== 'templates' || detailId) go('/templates');
         else window.dispatchEvent(new Event('nc:marketplace-focus-search'));
       } else if (action === 'checkmarkSquare') openPurchased(openTemplate);
-      else if (action) useUI.getState().toast(t('lp.templates.not_available_in_this_build', 'Not available in this build'));
     };
     window.addEventListener('nc:marketplace-action', on);
     return () => window.removeEventListener('nc:marketplace-action', on);
@@ -114,7 +105,6 @@ export function MarketplacePage({ tab }: { tab?: string }) {
               {error && <div className="nc-mkt-empty">{error}</div>}
               {active === 'discover' && <Discover templates={templates} onOpen={openTemplate} onTab={(x) => go(`/${x}`)} />}
               {active === 'templates' && <TemplatesTab templates={templates} onOpen={openTemplate} />}
-              {(active === 'agents' || active === 'consultants' || active === 'skills' || active === 'connections') && <SimpleListing kind={active} />}
             </>
           )}
         </div>
@@ -132,10 +122,10 @@ function Discover({ templates, onOpen, onTab }: { templates: TemplateInfo[]; onO
     <div className="nc-mkt-stack">
       <section className="nc-mkt-hero white">
         <div className="nc-mkt-hero-text">
-          <div className="nc-mkt-hero-label"><Icon name="chatUser" size={16} style={{ color: 'var(--lp-icon-secondary)' }} />{t('lp.templates.consulting', 'Consulting')}</div>
-          <div className="nc-mkt-hero-title">{t('lp.templates.get_a_free_setup_session', 'Get a free setup session')}</div>
-          <div className="nc-mkt-hero-desc">{t('lp.templates.certified_litpage_consultants_offer_limi', 'Certified Litpage consultants offer limited 30-minute sessions. Get help before the spots are gone.')}</div>
-          <div role="button" className="nc-mkt-dark-btn" onClick={() => onTab('consultants')}>{t('lp.templates.reserve_now', 'Reserve now')}</div>
+          <div className="nc-mkt-hero-label"><Icon name="squareGrid2X2Small" size={16} style={{ color: 'var(--lp-icon-secondary)' }} />{t('lp.templates.templates', 'Templates')}</div>
+          <div className="nc-mkt-hero-title">{t('lp.templates.start_from_a_template', 'Start from a template')}</div>
+          <div className="nc-mkt-hero-desc">{t('lp.templates.ready_made_pages_and_databases_free', 'Ready-made pages and databases, free for every workspace.')}</div>
+          <div role="button" className="nc-mkt-dark-btn" onClick={() => onTab('templates')}>{t('lp.templates.browse_templates', 'Browse templates')}</div>
         </div>
         <div className="nc-mkt-hero-art">
           <ThumbStack items={featured.slice(0, 3)} />
@@ -552,64 +542,6 @@ function DetailStats({ tpl, all }: { tpl: TemplateInfo; all: TemplateInfo[] }) {
           <div className="l">{x.sub}</div>
         </div>
       ))}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------- other tabs (static listings)
-
-const LISTINGS: Record<'agents' | 'consultants' | 'skills' | 'connections', { title: string; desc: string; items: { icon: string; name: string; desc: string }[] }> = {
-  agents: {
-    title: 'Agents', desc: 'Custom agents that work for your team in Litpage.',
-    items: [
-      { icon: '🗂️', name: 'Inbox triage', desc: 'Sorts incoming requests into the right database.' },
-      { icon: '📝', name: 'Meeting summarizer', desc: 'Turns meeting notes into decisions and action items.' },
-      { icon: '📈', name: 'Weekly reporter', desc: 'Writes a weekly status update from your project tracker.' },
-    ],
-  },
-  consultants: {
-    title: 'Consultants', desc: 'Certified experts who can help you set up Litpage.',
-    items: [
-      { icon: '🧭', name: 'Workspace setup', desc: 'A guided session to structure teamspaces and permissions.' },
-      { icon: '🛠️', name: 'Database design', desc: 'Model projects, tasks and relations for your team.' },
-      { icon: '🎓', name: 'Team training', desc: 'Onboard your team with live workshops.' },
-    ],
-  },
-  skills: {
-    title: 'Skills', desc: 'Reusable instructions for Litpage AI.',
-    items: [
-      { icon: '✍️', name: 'Write a project brief', desc: 'Drafts a brief from a few bullet points.' },
-      { icon: '🔎', name: 'Research summary', desc: 'Summarizes sources into key findings.' },
-      { icon: '🌐', name: 'Translate page', desc: 'Translates a page while keeping formatting.' },
-    ],
-  },
-  connections: {
-    title: 'Connections', desc: 'Connect apps to search, sync and take actions from Litpage.',
-    items: [
-      { icon: '💬', name: 'Chat apps', desc: 'Share pages and get notifications in your chat tools.' },
-      { icon: '📁', name: 'File storage', desc: 'Embed and search files from cloud drives.' },
-      { icon: '🐙', name: 'Code hosting', desc: 'Link pull requests and issues to pages.' },
-    ],
-  },
-};
-
-function SimpleListing({ kind }: { kind: 'agents' | 'consultants' | 'skills' | 'connections' }) {
-  const l = LISTINGS[kind];
-  return (
-    <div className="nc-mkt-stack">
-      <section>
-        <div className="nc-mkt-h2row"><h2 className="nc-mkt-h2">{tabLabel(kind)}</h2></div>
-        <p className="nc-mkt-listing-desc">{l.desc}</p>
-        <div className="nc-mkt-listing">
-          {l.items.map((x) => (
-            <div key={x.name} role="button" className="nc-mkt-listing-card" onClick={() => useUI.getState().toast(t('lp.templates.not_available_in_this_build', 'Not available in this build'))}>
-              <div className="nc-mkt-listing-icon">{x.icon}</div>
-              <div className="nc-mkt-listing-name">{x.name}</div>
-              <div className="nc-mkt-listing-text">{x.desc}</div>
-            </div>
-          ))}
-        </div>
-      </section>
     </div>
   );
 }

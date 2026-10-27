@@ -150,6 +150,7 @@ pnpm build && pnpm start
 | `NC_DATA_DIR` | `apps/server/data` | SQLite 데이터베이스와 올린 파일. 여기에 영구 볼륨을 연결합니다. |
 | `NC_PUBLIC_URL` | `http://127.0.0.1:5173` | 공개 주소. 메일 속 링크와 MCP OAuth 발급자 주소에 씁니다(없으면 OAuth는 요청 주소를 씁니다). |
 | `NC_BOOTSTRAP_EMAIL`, `NC_BOOTSTRAP_PASSWORD` | 없음 | 새로 설치한 프로덕션에서 첫 계정을 만듭니다. |
+| `NC_FEATURE_LEVEL` | `enterprise` | 모든 워크스페이스에 적용되는 기능 수준: `free`, `pro`, `business`, `enterprise`. 결제는 없으며, 서버가 시작될 때 기존 워크스페이스도 이 수준으로 바뀝니다. |
 | `NC_DEMO_MODE` | 없음 | `1`로 설정하면 방문자마다 임시 워크스페이스를 주는 공개 데모를 켭니다. 계정 정보, 워크스페이스 관리, 공유, 연동, 외부 동작, 공개 노출을 막습니다. |
 | `NC_DEMO_SANDBOX_HOURS` | `4` | 데모 모드에서 방문자 워크스페이스가 삭제되기까지의 시간입니다. |
 | `NC_DEMO_MAX_SANDBOXES` | `300` | 데모 모드에서 동시에 있을 수 있는 방문자 워크스페이스 수입니다. 가득 차면 만료된 것부터 지우고, 그래도 가득 차면 새 방문자에게 잠시 후 다시 시도하라고 안내합니다. |
@@ -248,7 +249,7 @@ pnpm test                                               # 단위 테스트: shar
 cd e2e && NC_BASE=http://127.0.0.1:5173 node smoke.mjs  # E2E, 영역별 스크립트
 ```
 
-E2E 스크립트는 Google Chrome(`e2e/lib.mjs`의 macOS 기본 경로)으로 개발 서버를 조작합니다. 이 README의 이미지는 `scripts/readme/`로 만듭니다(캡처한 뒤 이미지 빌드).
+E2E 스크립트는 Google Chrome(`e2e/lib.mjs`의 macOS 기본 경로)으로 `NC_FEATURE_LEVEL=pro`로 띄운 개발 서버를 조작합니다. 이 README의 이미지는 `scripts/readme/`로 만듭니다(캡처한 뒤 이미지 빌드).
 
 ## 만든 과정
 

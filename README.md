@@ -170,6 +170,7 @@ Set these as environment variables (in development, `apps/server/.env.local` is 
 | `NC_DATA_DIR` | `apps/server/data` | SQLite database and uploaded files. Mount a persistent volume here. |
 | `NC_PUBLIC_URL` | `http://127.0.0.1:5173` | Public address, used in links inside emails and as the MCP OAuth issuer (without it, OAuth uses the address of each request). |
 | `NC_BOOTSTRAP_EMAIL`, `NC_BOOTSTRAP_PASSWORD` | unset | Creates the first account on a fresh production install. |
+| `NC_FEATURE_LEVEL` | `enterprise` | Which plan-dependent features every workspace gets: `free`, `pro`, `business` or `enterprise`. There is no billing; existing workspaces move to this level when the server starts. |
 | `NC_DEMO_MODE` | unset | Set to `1` for a hardened public demo where every visitor gets a temporary workspace of their own. Account identity, workspace control, sharing, integrations, outbound actions and public exposure are blocked. |
 | `NC_DEMO_SANDBOX_HOURS` | `4` | In demo mode, how long a visitor's workspace lives before it is deleted. |
 | `NC_DEMO_MAX_SANDBOXES` | `300` | In demo mode, how many visitor workspaces may exist at once. When full, expired ones are deleted first, otherwise new visitors are asked to try again later. |
@@ -276,7 +277,8 @@ pnpm test                                               # unit tests: shared, se
 cd e2e && NC_BASE=http://127.0.0.1:5173 node smoke.mjs  # end-to-end, one script per area
 ```
 
-The end-to-end scripts drive Google Chrome (default macOS path in `e2e/lib.mjs`) against a dev server. The images in
+The end-to-end scripts drive Google Chrome (default macOS path in `e2e/lib.mjs`) against a dev server started with
+`NC_FEATURE_LEVEL=pro` (they switch levels themselves where it matters, through the development-only `changePlan` call). The images in
 this README come from `scripts/readme/` (capture, then build the assets).
 
 ## How it was built

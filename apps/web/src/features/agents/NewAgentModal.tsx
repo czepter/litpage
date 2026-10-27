@@ -6,7 +6,6 @@ import { useEffect, useRef, useState } from 'react';
 import { Icon } from '../../components/Icon.tsx';
 import { Modal } from '../../components/Modal.tsx';
 import { useSession } from '../../lib/store/session.ts';
-import { useUI } from '../../lib/store/ui.ts';
 import { navigate } from '../../lib/router.ts';
 import { t } from '../shell/i18n.ts';
 import { agentApi, agentUrl, applyAnswer, toastError, useAgents } from './agentsApi.ts';
@@ -18,7 +17,6 @@ type Template = Awaited<ReturnType<typeof agentApi.templates>>['templates'][numb
 const useNewAgent = { open: null as null | (() => void), pending: false };
 
 function Launch({ close }: { close: () => void }) {
-  const admin = useAgents((s) => s.isAdmin);
   return (
     <div className="nc-agent-launch" data-testid="agent-launch-modal">
       <div className="nc-agent-launch-art" aria-hidden><Icon name="agentFace" size={56} /></div>
@@ -39,9 +37,6 @@ function Launch({ close }: { close: () => void }) {
       </div>
       <div className="nc-agent-launch-actions">
         {HELP_URL && <button type="button" className="nc-btn outline" onClick={() => { close(); window.open(HELP_URL!, '_blank', 'noopener'); }}>{t('lp.agents.learn_more', 'Learn more')}</button>}
-        <button type="button" className="nc-btn primary" onClick={() => { close(); useUI.getState().openSettings(admin ? 'plans' : 'plans'); }}>
-          {admin ? t('lp.agents.upgrade_to_try_it', 'Upgrade to try it') : t('lp.agents.ask_to_try_it', 'Ask to try it')}
-        </button>
       </div>
     </div>
   );

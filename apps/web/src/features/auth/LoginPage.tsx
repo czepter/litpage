@@ -131,39 +131,22 @@ function AuthHelpButton() {
   );
 }
 
-function Providers({ mode }: { mode: 'login' | 'signup' }) {
-  const list = mode === 'signup'
-    ? [['google', t('lp.auth.google', 'Google')], ['microsoft', t('lp.auth.microsoft', 'Microsoft')], ['openAi', t('lp.auth.chatgpt', 'ChatGPT')]]
-    : [
-        ['google', t('lp.auth.google', 'Google')],
-        ['openAi', t('lp.auth.chatgpt', 'ChatGPT')],
-        ['appleTintable', t('lp.auth.apple', 'Apple')],
-        ['microsoft', t('lp.auth.microsoft', 'Microsoft')],
-        ['personKeyFill', t('lp.auth.passkey', 'Passkey')],
-        ['building', t('lp.auth.sso', 'SSO')],
-      ];
+/** Passkey sign-in (the only sign-in provider besides email in this build). */
+function Providers() {
   return (
     <div className="nc-auth-providers">
-      {list.map(([icon, label]) => (
-        <button
-          key={label}
-          type="button"
-          className="nc-auth-provider"
-          onClick={() => {
-            
-            if (icon === 'personKeyFill') {
-              void signInWithPasskey()
-                .then(async (done) => { if (done) await useSession.getState().load(); })
-                .catch((e) => useUI.getState().toast((e as Error)?.message || t('lp.auth.passkey_sign_in_failed_try_again', 'Passkey sign-in failed. Try again.')));
-              return;
-            }
-            useUI.getState().toast(t('lp.auth.sign_in_is_not_available_in', '{provider} sign-in is not available in this build. Continue with your email.', { provider: label }));
-          }}
-        >
-          <Icon name={icon} size={22} />
-          <span>{label}</span>
-        </button>
-      ))}
+      <button
+        type="button"
+        className="nc-auth-provider"
+        onClick={() => {
+          void signInWithPasskey()
+            .then(async (done) => { if (done) await useSession.getState().load(); })
+            .catch((e) => useUI.getState().toast((e as Error)?.message || t('lp.auth.passkey_sign_in_failed_try_again', 'Passkey sign-in failed. Try again.')));
+        }}
+      >
+        <Icon name="personKeyFill" size={22} />
+        <span>{t('lp.auth.passkey', 'Passkey')}</span>
+      </button>
     </div>
   );
 }
@@ -579,8 +562,7 @@ function AuthScreen({ mode }: { mode: 'login' | 'signup' }) {
       )}
       {showEmailForm && (
         <>
-          <Divider />
-          <Providers mode={mode} />
+          {mode === 'login' && <><Divider /><Providers /></>}
           <div className="nc-auth-switch">{switchLink}</div>
         </>
       )}

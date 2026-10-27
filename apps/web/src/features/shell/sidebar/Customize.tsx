@@ -223,7 +223,7 @@ function openAddSectionMenu(tab: SidebarTab, anchor: HTMLElement) {
   const teams = (records.all<TeamRecord>('team') as TeamRecord[]).filter((x) => x.space_id === useSession.getState().spaceId && x.alive !== false);
   const sec = (type: SectionType, extra?: Partial<MenuItemDef>): MenuItemDef => ({ label: sectionLabel(type), icon: SECTION_ICON[type], onSelect: () => addSection(tab, type), ...extra });
   const existing = new Set(tab.sections.map((s) => s.type));
-  const builtins: SectionType[] = ['upcoming_events', 'recents', 'favorites', 'teamspaces', 'shared', 'private'].filter((x) => !existing.has(x as SectionType)) as SectionType[];
+  const builtins: SectionType[] = ['recents', 'favorites', 'teamspaces', 'shared', 'private'].filter((x) => !existing.has(x as SectionType)) as SectionType[];
   openMenu(anchor, {
     width: 240,
     dividers: false,

@@ -325,7 +325,7 @@ describe('audit log, analytics and content search authorization', () => {
     expect(await status(() => call(ids.admin, 'getAuditLog', { spaceId: ids.space }))).toBe(403);
     expect(await status(() => call(ids.outsider, 'getAuditLog', { spaceId: ids.space }))).toBe(403);
     expect(await status(() => call(ids.owner, 'getAuditLog', { spaceId: ids.space }))).toBe(403); // Plus plan
-    await call(ids.owner, 'changePlan', { spaceId: ids.space, plan: 'enterprise' });
+    setSpace({ plan_type: 'enterprise' });
     // security toggles flipped through the settings UI path (transactions) are audited
     for (const v of [true, false]) {
       await tx(ids.owner, [{ pointer: { table: 'space', id: ids.space }, path: [], command: 'update', args: { disable_export: v, disable_public_access: v } }]);

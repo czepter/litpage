@@ -33,7 +33,7 @@ try {
   await page.waitForTimeout(800);
   await shot('01-discover');
   const tabs = await page.$$eval('.nc-mkt-tab', (els) => els.map((e) => e.textContent));
-  ok(tabs.join('|') === 'Discover|Templates|Agents|Consultants|Skills|Connections', `tabs ${tabs.join('|')}`);
+  ok(tabs.join('|') === 'Discover|Templates', `tabs ${tabs.join('|')}`);
   // Templates tab
   await page.click('.nc-mkt-tab:has-text("Templates")');
   await page.waitForSelector('.nc-mkt-tpl-title');

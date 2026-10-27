@@ -1,7 +1,7 @@
 import { HELP_URL } from '@nc/shared/brand.ts';
 // Settings › Workspace: General (Sidebar / Danger zone / Workspace ID, plus the admin rows), and the admin-only
 // Teamspaces, Security, Identity and Requests sections. Admin features are plan-gated by space.plan_type
-// (Plus by default).
+// (the server's NC_FEATURE_LEVEL).
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SpaceRecord, TeamRecord, UserRecord } from '@nc/shared/records.ts';
 import { api, uploadFile } from '../../../lib/api.ts';
@@ -1081,7 +1081,6 @@ function AddDomainBody({ close, onAdd, existing }: { close: () => void; onAdd: (
 
 export interface MemberRequest { id: string; emails: string[]; requested_by: string; created_time: number; via?: string; self?: boolean; message?: string; team_id?: string }
 interface GuestInviteRequest { id: string; kind: string; pageId: string; requesterId: string; emails: string[]; role: string | null; message: string; createdTime: number; restricted?: boolean }
-export interface UpgradeRequest { id: string; plan: string; note?: string; requested_by: string; created_time: number }
 
 export function RequestsSection() {
   const { space, admin, owner } = useSpaceAccess();
@@ -1097,7 +1096,6 @@ export function RequestsSection() {
   }, [space?.id, admin]);
   if (!space) return null;
   const memberReqs = spaceSetting<MemberRequest[]>(space, 'member_requests', []);
-  const upgradeReqs = spaceSetting<UpgradeRequest[]>(space, 'upgrade_requests', []);
   const resolve = async (requestId: string, approve: boolean) => {
     try {
       await spaceApi('resolveMemberRequest', { spaceId: space.id, requestId, approve });
@@ -1119,14 +1117,8 @@ export function RequestsSection() {
     }
   };
   return (
-    <SectionPage title={t('lp.settings.requests', 'Requests')} subtitle={t('lp.settings.review_member_and_add_on_requests', 'Review member and add-on requests')}>
+    <SectionPage title={t('lp.settings.requests', 'Requests')} subtitle={t('lp.settings.review_member_requests', 'Review member requests')}>
       <Group title={t('lp.settings.permissions', 'Permissions')}>
-        <Row
-          id="allow-upgrade-requests"
-          label={t('lp.settings.let_members_request_upgrades', 'Let members request upgrades')}
-          description={t('lp.settings.people_in_this_workspace_can_request', 'People in this workspace can request a plan upgrade, add-ons, or other changes from an owner')}
-          control={<span data-tooltip={owner ? undefined : policyTooltip.ownersOnly()}><Switch label="Let members request upgrades" disabled={!owner} checked={spaceSetting(space, 'allow_upgrade_requests', true)} onChange={(v) => saveSpaceSettings(space.id, { allow_upgrade_requests: v })} /></span>}
-        />
         <Row
           id="allow-member-requests"
           label={t('lp.settings.let_members_ask_to_add_other', 'Let members ask to add other members')}
@@ -1170,37 +1162,6 @@ export function RequestsSection() {
             <Button variant="primary" onClick={() => void resolveGuest(r.id, true)}>{t('lp.settings.approve', 'Approve')}</Button>
           </div>
         ))}
-      </Group>
-      <Group title={t('lp.settings.upgrades', 'Upgrades')}>
-        {!upgradeReqs.length ? (
-          <div className="nc-set-empty-card">
-            <div>{t('lp.settings.nobody_in_your_workspace_has_asked', 'Nobody in your workspace has asked for an upgrade')}</div>
-            <Button onClick={() => useUI.getState().set({ settingsSection: 'plans' })}>{t('lp.settings.explore_plans', 'Explore plans')}</Button>
-          </div>
-        ) : (
-          <table className="nc-set-table">
-            <thead>
-              <tr>
-                <th>{t('lp.settings.upgrade_plan', 'Upgrade Plan')}</th>
-                <th>{t('lp.settings.requested_by', 'Requested By')}</th>
-                <th>{t('lp.settings.date', 'Date')}</th>
-                <th>{t('lp.settings.note', 'Note')}</th>
-                <th style={{ width: 110 }} />
-              </tr>
-            </thead>
-            <tbody>
-              {upgradeReqs.map((r) => (
-                <tr key={r.id}>
-                  <td className="primary">{r.plan === 'lit_ai' ? t('lp.settings.litpage_ai', 'Litpage AI') : r.plan === 'business' ? t('lp.settings.business', 'Business') : r.plan === 'enterprise' ? t('lp.settings.enterprise', 'Enterprise') : r.plan.charAt(0).toUpperCase() + r.plan.slice(1)}</td>
-                  <td>{userName(r.requested_by)}</td>
-                  <td>{fmtDate(r.created_time)}</td>
-                  <td>{r.note || '—'}</td>
-                  <td><Button small onClick={() => useUI.getState().set({ settingsSection: 'plans' })}>{t('lp.settings.view_detail', 'View Detail')}</Button></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
       </Group>
     </SectionPage>
   );

@@ -149,18 +149,7 @@ describe('audit events that were defined but never recorded', () => {
   });
 });
 
-describe('plan requests and teamspace publishing', () => {
-  it('upgrading clears the requests it meets, Litpage AI requests included', async () => {
-    setSpace({ plan_type: 'plus' }, { upgrade_requests: [] });
-    await call(ids.member, 'requestUpgrade', { spaceId: ids.space, plan: 'lit_ai' });
-    await call(ids.member, 'requestUpgrade', { spaceId: ids.space, plan: 'business' });
-    await call(ids.member, 'requestUpgrade', { spaceId: ids.space, plan: 'enterprise' });
-    await call(ids.owner, 'changePlan', { spaceId: ids.space, plan: 'business' });
-    expect(db.getRecord<any>('space', ids.space)!.settings.upgrade_requests.map((r: any) => r.plan)).toEqual(['enterprise']);
-    const notes = (db.db.prepare(`SELECT data FROM records WHERE tbl = 'notification' AND json_extract(data, '$.user_id') = ?`).all(ids.member) as any[]).map((r) => JSON.parse(r.data));
-    expect(notes.filter((n) => JSON.stringify(n).includes('approved')).length).toBeGreaterThanOrEqual(2);
-  });
-
+describe('teamspace publishing', () => {
   it('turning publishing off for a teamspace takes its public links down', async () => {
     const p = newId();
     db.putRecord('block', page(p, ids.team, 'team', { permissions: [{ type: 'public_permission', role: 'reader', published: true }] }) as any);

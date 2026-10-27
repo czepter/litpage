@@ -2,11 +2,10 @@
 //,video,audio,file,pdf}-popover-overlay.html: dialog r10 --lp-shadow-outset-large; tab strip with 8px
 // inline padding, 28px tabs (14px, texPri active + 2px underline / graTexAccPri idle); image 540px wide, other
 // media 300px; image Upload = outline "Upload file" 32px; other Upload = blue "Choose a file" 28px.
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { create } from 'zustand';
 import type { BlockRecord } from '@nc/shared/records.ts';
 import { openOverlay, PopoverSurface } from '../../../../components/overlay.tsx';
-import { Icon } from '../../../../components/Icon.tsx';
 import { api, uploadFile } from '../../../../lib/api.ts';
 import { getBlock, run, setFormat, setProperty, touch } from '../../../../lib/blocks.ts';
 import { useSession } from '../../../../lib/store/session.ts';
@@ -14,7 +13,7 @@ import { fileSizeLabel, isValidUrl, normalizeUrl, containerWidthOf, toast } from
 import { isAudioFile, isImageFile, isPdfFile, isVideoFile, providerByName, providerForType, providerForUrl, resolveEmbed, videoEmbedUrl } from './embedProviders.ts';
 import { AiImageTab, aiImageTabs } from '../../../aiImage/AiImageTab.tsx';
 
-type Tab = 'upload' | 'link' | 'unsplash' | 'giphy' | 'embed' | 'add' | 'ai';
+type Tab = 'upload' | 'link' | 'embed' | 'add' | 'ai';
 
 /* ------------------------------------------------------------ upload progress */
 
@@ -203,7 +202,7 @@ function configFor(b: BlockRecord): PickerConfig {
   const provider = providerByName(b.format?.embed_provider as string | undefined) ?? (b.type !== 'embed' ? providerForType(b.type) : undefined);
   switch (b.type) {
     case 'image':
-      return { width: 540, tabs: ['upload', 'link', 'unsplash', 'giphy', ...aiImageTabs(b)], accept: 'image/*', uploadLabel: 'Upload file', uploadStyle: 'outline', linkPlaceholder: 'Paste an image URL…', linkButton: 'Embed image', linkCaption: 'Accepts image URLs from the web' };
+      return { width: 540, tabs: ['upload', 'link', ...aiImageTabs(b)], accept: 'image/*', uploadLabel: 'Upload file', uploadStyle: 'outline', linkPlaceholder: 'Paste an image URL…', linkButton: 'Embed image', linkCaption: 'Accepts image URLs from the web' };
     case 'video':
       return { width: 300, tabs: ['upload', 'link'], accept: 'video/*', uploadLabel: 'Choose a video', uploadStyle: 'primary', linkPlaceholder: 'Paste a video URL…', linkButton: 'Embed video', linkCaption: 'Supports YouTube, Vimeo, and other sites' };
     case 'audio':
@@ -227,7 +226,7 @@ export function openMediaPicker(block: BlockRecord, anchor: HTMLElement, opts?: 
   return openOverlay((close) => <MediaPicker blockId={block.id} close={close} replace={opts?.replace} />, { anchor, placement: 'bottom', offset: 0 });
 }
 
-const TAB_LABEL: Record<Tab, string> = { upload: 'Upload', link: 'Link', unsplash: 'Unsplash', giphy: 'GIPHY', embed: 'Embed link', add: 'Add', ai: 'Litpage AI' };
+const TAB_LABEL: Record<Tab, string> = { upload: 'Upload', link: 'Link', embed: 'Embed link', add: 'Add', ai: 'Litpage AI' };
 
 export function PickerTabs({ tabs, tab, setTab, right }: { tabs: Tab[]; tab: Tab; setTab: (t: Tab) => void; right?: ReactNode }) {
   return (
@@ -235,8 +234,6 @@ export function PickerTabs({ tabs, tab, setTab, right }: { tabs: Tab[]; tab: Tab
       {tabs.map((t) => (
         <div key={t} className={`nc-media-tab-wrap ${t === tab ? 'active' : ''}`}>
           <div role="tab" aria-selected={t === tab} className="nc-media-tab" onMouseDown={(e) => e.preventDefault()} onClick={() => setTab(t)}>
-            {t === 'unsplash' && <Icon name="unsplash" size={12} style={{ marginInlineEnd: 4 }} />}
-            {t === 'giphy' && <Icon name="giphy" size={12} style={{ marginInlineEnd: 4 }} />}
             {TAB_LABEL[t]}
           </div>
           {t === tab && <div className="nc-media-tab-underline" />}
@@ -308,45 +305,9 @@ function MediaPicker({ blockId, close, replace }: { blockId: string; close: () =
             {error ? <div className="nc-media-error">{error}</div> : cfg.linkCaption && <div className="nc-media-caption">{cfg.linkCaption}</div>}
           </div>
         )}
-        {(tab === 'unsplash' || tab === 'giphy') && <StockTab kind={tab} onPick={(u) => { close(); void setMediaSource(blockId, u); }} />}
         {tab === 'ai' && <AiImageTab blockId={blockId} close={close} />}
       </div>
     </PopoverSurface>
   );
 }
 
-/** Unsplash / GIPHY tabs: search box + grid. Without network access to those services the grid offers a * small set of generated gradient images (data URLs) so the flow can be exercised offline. */
-function StockTab({ kind, onPick }: { kind: 'unsplash' | 'giphy'; onPick: (url: string) => void }) {
-  const [q, setQ] = useState('');
-  const items = useMemo(() => stockImages(q || kind), [q, kind]);
-  useEffect(() => undefined, []);
-  return (
-    <div className="nc-stock">
-      <div className="nc-input">
-        <input autoFocus placeholder={kind === 'unsplash' ? 'Find an image…' : 'Search GIPHY…'} value={q} onChange={(e) => setQ(e.target.value)} />
-      </div>
-      <div className="nc-stock-grid">
-        {items.map((it) => (
-          <div key={it.url} role="button" className="nc-stock-item" onClick={() => onPick(it.url)} title={it.label}>
-            <img src={it.url} alt={it.label} />
-            <div className="nc-stock-by">by {it.author}</div>
-          </div>
-        ))}
-      </div>
-      <div className="nc-media-caption">{kind === 'unsplash' ? 'Unsplash search is offline in this build; generated images are shown.' : 'GIPHY search is offline in this build; generated images are shown.'}</div>
-    </div>
-  );
-}
-
-const AUTHORS = ['Haseeb Jamil', 'Ginta Wang', 'Hanseul Kim', 'Ian Macharia', 'Mayur Deshpande', 'Gijs Tissink', 'Seongho Jang', 'Martijn Baudoin'];
-
-function stockImages(seed: string): { url: string; label: string; author: string }[] {
-  let h = 0;
-  for (const c of seed) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  return Array.from({ length: 8 }, (_, i) => {
-    const a = (h + i * 47) % 360;
-    const b = (a + 40 + i * 13) % 360;
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="hsl(${a},70%,62%)"/><stop offset="1" stop-color="hsl(${b},65%,42%)"/></linearGradient></defs><rect width="1200" height="800" fill="url(#g)"/><circle cx="${300 + i * 90}" cy="${260 + (i % 3) * 90}" r="${120 + i * 10}" fill="rgba(255,255,255,.18)"/></svg>`;
-    return { url: `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`, label: `${seed} ${i + 1}`, author: AUTHORS[(h + i) % AUTHORS.length] };
-  });
-}

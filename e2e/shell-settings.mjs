@@ -72,8 +72,8 @@ try {
   });
 
   // every section renders
-  const sections = ['account', 'preferences', 'notifications', 'mail-calendar', 'general', 'members', 'teamspaces', 'security', 'identity', 'import',
-    'lit-ai', 'meeting-notes', 'connections', 'lit-mcp', 'verified-pages', 'public-pages', 'emoji', 'developers', 'requests', 'billing', 'plans'];
+  const sections = ['account', 'preferences', 'notifications', 'general', 'members', 'teamspaces', 'security', 'identity', 'import',
+    'lit-ai', 'meeting-notes', 'connections', 'lit-mcp', 'verified-pages', 'public-pages', 'emoji', 'developers', 'requests'];
   for (const [i, key] of sections.entries()) {
     await step(`render ${key}`, async () => {
       await tab(key);
@@ -178,53 +178,16 @@ try {
     ok(await page.locator('.nc-set-etable tr[data-emoji="party-time"]').count() === 0, 'emoji deleted');
   });
 
-  await step('security + plan change', async () => {
+  await step('security', async () => {
     await tab('security');
     await page.click('.nc-set-pill:has-text("Members & guests")');
     const sw = page.locator('.nc-set-row[data-setting="external-member-requests"] input[role=switch]');
     await sw.click();
     await page.waitForTimeout(400);
     ok(await sw.isChecked(), 'security toggle saved');
-    ok(await page.locator('.nc-set-row[data-setting="allow-guests"] input[role=switch]').isDisabled(), 'enterprise toggle locked on Plus');
-    await tab('plans');
-    await page.click('.nc-set-plan-head .col[data-plan="enterprise"] .nc-set-btn');
-    await page.click('.nc-set-subdialog .actions .nc-set-btn.primary');
-    await page.waitForTimeout(700);
-    ok((await page.locator('.nc-set-plan-head .col[data-plan="enterprise"]').textContent()).includes('Active'), 'plan upgraded to Enterprise');
-    await shot('60-plans-enterprise');
-    await tab('security');
-    await page.click('.nc-set-pill:has-text("Members & guests")');
-    // (Allow members to invite guests stays locked while non-member access requests are on)
-    await page.click('.nc-set-pill:has-text("General")');
-    ok(!(await page.locator('.nc-set-row[data-setting="disable-export"] input[role=switch]').isDisabled()), 'enterprise toggle unlocked');
-    await tab('plans');
-    await page.click('.nc-set-plan-head .col[data-plan="plus"] .nc-set-btn');
-    await page.click('.nc-set-subdialog .actions .nc-set-btn');
-    await page.waitForTimeout(700);
-    ok((await page.locator('.nc-set-plan-head .col[data-plan="plus"]').textContent()).includes('Active'), 'plan back to Pro (plus)');
-    // feature levels list their features inline (no billing, no separate compare table)
-    ok(await page.locator('.nc-set-highlights .col').count() === 4, 'four feature levels listed with their features');
-    await shot('61-feature-levels');
-  });
-
-  await step('connections filters', async () => {
-    await tab('connections');
-    await page.locator('.nc-set-conn-filter').first().click(); // "Filter categories: All categories"
-    await shot('70-category-menu');
-    const items = await page.$$eval(opts, (els) => els.map((e) => e.textContent));
-    ok(['All categories', 'Communication', 'Projects and tasks'].every((c) => items.some((x) => x.includes(c))), `category menu lists the catalog categories (${items.length})`);
-    await page.locator(opts, { hasText: 'Communication' }).first().click();
-    await page.waitForTimeout(200);
-    const cats = await page.$$eval('.nc-set-conn-cat .nc-set-cat-title', (els) => els.map((e) => e.textContent));
-    ok(cats.length === 1 && cats[0] === 'Communication', `category filter → ${cats.join(',')}`);
-    await page.locator('.nc-set-conn-filter').nth(1).click(); // "Filter connection types: All types"
-    await shot('71-type-menu');
-    await page.keyboard.press('Escape');
-    await page.fill('[aria-label="Search connections"]', 'git');
-    await page.waitForTimeout(200);
-    const names = await page.$$eval('.nc-set-ccard .nm', (els) => els.map((e) => e.textContent));
-    ok(names.includes('GitHub') && names.includes('GitLab'), `search "git" → ${names.join(',')}`);
-    await shot('72-search');
+    // the dev server runs with NC_FEATURE_LEVEL=pro (README › Development)
+    ok(await page.locator('.nc-set-row[data-setting="allow-guests"] input[role=switch]').isDisabled(), 'enterprise toggle locked on Pro');
+    ok(await page.locator('[data-settings-key="plans"], [data-settings-key="billing"]').count() === 0, 'no plans or billing pages');
   });
 
   await step('mcp + developer', async () => {

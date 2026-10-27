@@ -109,7 +109,7 @@ const BLOCKED_RPC_NAMES = new Set([
   'createWorkspace', 'inviteMembers', 'setSpaceDomain', 'leaveSpace', 'deleteWorkspace', 'setMemberRole', 'removeMember', 'resetInviteLink', 'setInviteLinkEnabled', 'joinSpaceByInviteLink',
   'requestMembers', 'resolveMemberRequest', 'setAllowedEmailDomains', 'upgradeGuests', 'removeGuest', 'createGroup', 'updateGroup', 'deleteGroup', 'setMemberExpiration', 'transferPrivatePages',
   'getPublicPages', 'removeWorkspaceConnection',
-  'setDefaultTeams', 'requestUpgrade', 'changePlan', 'addCustomEmoji', 'editCustomEmoji', 'removeCustomEmoji',
+  'setDefaultTeams', 'changePlan', 'addCustomEmoji', 'editCustomEmoji', 'removeCustomEmoji',
   'joinWorkspace', 'requestWorkspaceMembership', 'joinTeamByInviteLink', 'getTeamInviteLink', 'resetTeamInviteLink', 'getTeamInvite', 'requestMembershipByTeamInvite', 'requestJoinTeam',
   'createTeamFromPage',
   'invitePagePermissions', 'restrictPageAccess', 'restoreInheritedAccess', 'getPublishedPage', 'duplicatePublicPage', 'requestGuestInvite', 'requestRestrictedMemberAccess', 'requestPageAccess', 'decideAccessRequest',

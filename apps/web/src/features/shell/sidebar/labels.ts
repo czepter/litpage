@@ -72,8 +72,6 @@ export const SHORTCUT_ICON: Record<ShortcutType, string> = {
 
 export function sectionLabel(type: SectionType): string {
   switch (type) {
-    case 'upcoming_events':
-      return t('lp.shell.upcoming_events', 'Upcoming events');
     case 'recents':
       return t('lp.shell.recents', 'Recents');
     case 'favorites':
@@ -104,7 +102,6 @@ export function sectionLabel(type: SectionType): string {
 }
 
 export const SECTION_ICON: Record<SectionType, string> = {
-  upcoming_events: 'calendar',
   recents: 'clock',
   favorites: 'star',
   teamspaces: 'building',
@@ -122,7 +119,6 @@ export const SECTION_ICON: Record<SectionType, string> = {
 
 
 export const SECTION_CLASS: Record<SectionType, string> = {
-  upcoming_events: 'shared',
   recents: 'recents',
   favorites: 'bookmarks',
   teamspaces: 'team',

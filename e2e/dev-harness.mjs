@@ -62,7 +62,7 @@ export async function startDevHarness({ key = true, apiPort = 3201, webPort = 55
   mkdirSync(DATA_ROOT, { recursive: true });
   const dataDir = mkdtempSync(join(DATA_ROOT, 'run-'));
   Object.assign(env, extraEnv);
-  spawnLogged('api', process.execPath, ['src/main.ts'], { cwd: join(ROOT, 'apps/server'), env: { ...env, PORT: String(apiPort), NC_DATA_DIR: dataDir, NC_DEV_LOGIN_CODES: '1', NC_DEV_ALLOW_LOOPBACK_FETCH: '1' } });
+  spawnLogged('api', process.execPath, ['src/main.ts'], { cwd: join(ROOT, 'apps/server'), env: { NC_FEATURE_LEVEL: 'pro', ...env, PORT: String(apiPort), NC_DATA_DIR: dataDir, NC_DEV_LOGIN_CODES: '1', NC_DEV_ALLOW_LOOPBACK_FETCH: '1' } });
   spawnLogged('web', process.execPath, [join(ROOT, 'apps/web/node_modules/vite/bin/vite.js'), '--config', join(ROOT, 'e2e/dev-vite.config.mjs')], {
     cwd: join(ROOT, 'apps/web'),
     env: { ...env, NC_API: `http://127.0.0.1:${apiPort}`, NC_WEB_PORT: String(webPort), ...(ports.length === 3 ? { NC_E2E_VITE_CACHE: join(tmpdir(), `nc-dev-e2e-vite-cache-${webPort}`) } : {}) },

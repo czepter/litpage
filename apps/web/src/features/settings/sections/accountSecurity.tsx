@@ -142,13 +142,6 @@ function TwoStepSetup({ sec, close, onChange }: { sec: AccountSecurity; close: (
             <div className="d">{t('lp.settings.use_an_authenticator_app_to_get', 'Use an authenticator app to get one-time codes')}</div>
           </div>
         </div>
-        <div role="button" tabIndex={-1} aria-disabled="true" className="nc-set-method" data-tooltip={t('lp.settings.text_messages_aren_t_available_in', 'Text messages aren’t available in this build')}>
-          <Icon name="smartphone" size={22} />
-          <div>
-            <div className="t">{t('lp.settings.text_a_code_to_me', 'Text a code to me')}</div>
-            <div className="d">{t('lp.settings.add_a_phone_number_and_confirm', 'Add a phone and confirm it')}</div>
-          </div>
-        </div>
         {err && <div className="error">{err}</div>}
         <div className="actions"><Button onClick={close}>{t('lp.settings.cancel', 'Cancel')}</Button></div>
       </>
@@ -391,13 +384,6 @@ function ManageTwoStep({ initial, close, onChange }: { initial: AccountSecurity;
         <div>
           <div className="t">{t('lp.settings.add_authenticator', 'Add authenticator')}</div>
           <div className="d">{n >= sec.mfa.maxAuthenticators ? t('lp.settings.2_of_2_authenticators_are_set', '2 of 2 authenticators are set up') : t('lp.settings.authenticators_in_use_of_2', 'Authenticators in use: {numOfTotpSettings} of 2', { numOfTotpSettings: n })}</div>
-        </div>
-      </div>
-      <div role="button" tabIndex={-1} aria-disabled="true" className="nc-set-method" data-tooltip={t('lp.settings.text_messages_aren_t_available_in', 'Text messages aren’t available in this build')}>
-        <Icon name="smartphone" size={20} />
-        <div>
-          <div className="t">{t('lp.settings.add_a_phone_number', 'Add a phone')}</div>
-          <div className="d">{t('lp.settings.of_2_phone_numbers_are_added', '{numOfSmsSettings} of 2 phone numbers are added', { numOfSmsSettings: 0 })}</div>
         </div>
       </div>
       <div className="actions">

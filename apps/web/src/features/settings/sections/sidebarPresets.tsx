@@ -21,7 +21,7 @@ import {
 import '../admin.css';
 
 const SHORTCUT_TYPES: ShortcutType[] = ['new_chat', 'library', 'new_page', 'new_meeting_note', 'new_database', 'settings', 'meeting_notes', 'skills', 'my_tasks', 'lit_calendar', 'marketplace'];
-const SECTION_TYPES: SectionType[] = ['upcoming_events', 'recents', 'favorites', 'teamspaces', 'shared', 'private', 'chats', 'pinned_chats', 'agents', 'ai_meeting_notes', 'lit_apps'];
+const SECTION_TYPES: SectionType[] = ['recents', 'favorites', 'teamspaces', 'shared', 'private', 'chats', 'pinned_chats', 'agents', 'ai_meeting_notes', 'lit_apps'];
 
 type Group = 'default' | 'optional' | 'deleted';
 

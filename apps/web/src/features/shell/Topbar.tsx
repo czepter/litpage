@@ -114,10 +114,6 @@ function RouteTitle({ name }: { name: string }) {
 
 const MARKETPLACE_TABS: Record<string, () => string> = {
   templates: () => t('lp.shell.templates', 'Templates'),
-  agents: () => t('lp.shell.agents', 'Agents'),
-  consultants: () => t('lp.shell.consultants', 'Consultants'),
-  skills: () => t('lp.shell.skills', 'Skills'),
-  connections: () => t('lp.shell.connections', 'Connections'),
 };
 
 function MarketplaceActions() {
@@ -125,7 +121,6 @@ function MarketplaceActions() {
     <div className="lit-topbar-action-buttons">
       {[
         ['search', t('lp.shell.search', 'Search')],
-        ['personCircle', t('lp.shell.my_profile', 'My profile')],
         ['checkmarkSquare', t('lp.shell.purchased', 'Purchased')],
       ].map(([icon, label]) => (
         <div key={label} role="button" className="nc-btn" style={{ fontWeight: 500, gap: 6 }} onClick={() => window.dispatchEvent(new CustomEvent('nc:marketplace-action', { detail: { action: icon } }))}>

@@ -258,25 +258,25 @@ export function sendLoginCodeEmail(email: string, code: string) {
   sendMail({ to: email, kind: 'login_code', ...mailTemplates.loginCode(code), sensitive: true });
 }
 
-/** Settings › Requests (api/modules/workspace.ts calls these): a member asked to add people / upgrade
+/** Settings › Requests (api/modules/workspace.ts calls these): a member asked to add people
  * → workspace owners & membership admins get an Inbox item; resolving it → the requester hears back. */
-export function notifyWorkspaceRequest(o: { spaceId: string; requesterId: string; kind: 'member' | 'upgrade'; emails?: string[]; plan?: string; message?: string; requestId?: string }) {
+export function notifyWorkspaceRequest(o: { spaceId: string; requesterId: string; kind: 'member'; emails?: string[]; message?: string; requestId?: string }) {
   const space = getRecord<SpaceRecord>('space', o.spaceId);
   if (!space) return;
   const admins = (space.permissions ?? []).filter((p) => p.type === 'user_permission' && p.user_id && ((p.role as string) === 'owner' || (p.role as string) === 'membership_admin')).map((p) => p.user_id!);
   for (const a of admins.filter((x) => x !== o.requesterId).slice(0, 20)) {
     pushNotification({
       user_id: a, space_id: o.spaceId, type: 'space_member_requested', actor_id: o.requesterId,
-      activity: { kind: o.kind, emails: o.emails, plan: o.plan, message: o.message || undefined, request_id_ws: o.requestId },
+      activity: { kind: o.kind, emails: o.emails, message: o.message || undefined, request_id_ws: o.requestId },
     });
   }
 }
 
-export function notifyWorkspaceRequestResolved(o: { spaceId: string; requesterId: string; actorId: string; kind: 'member' | 'upgrade'; status: 'approved' | 'denied'; emails?: string[]; plan?: string; self?: boolean; spaceName?: string }) {
+export function notifyWorkspaceRequestResolved(o: { spaceId: string; requesterId: string; actorId: string; kind: 'member'; status: 'approved' | 'denied'; emails?: string[]; self?: boolean; spaceName?: string }) {
   if (o.requesterId === o.actorId) return;
   pushNotification({
     user_id: o.requesterId, space_id: o.spaceId, type: 'access_granted', actor_id: o.actorId,
     // self: the requester asked to join themselves (guest banner / team invite link) — "welcomed you to {workspace}"
-    activity: { kind: o.kind === 'upgrade' ? 'upgrade_request' : 'member_request', status: o.status, emails: o.emails, plan: o.plan, ...(o.self ? { self: true, space_name: o.spaceName } : {}) },
+    activity: { kind: 'member_request', status: o.status, emails: o.emails, ...(o.self ? { self: true, space_name: o.spaceName } : {}) },
   });
 }

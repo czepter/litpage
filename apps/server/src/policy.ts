@@ -347,8 +347,6 @@ export function copyPolicyProblem(g: GuardLike, table: string, rec: any): string
 export const SERVER_SPACE_SETTINGS = new Set([
   'allowed_email_domains', // setAllowedEmailDomains (owners; domains members use, no public email providers)
   'member_requests', // requestMembers / resolveMemberRequest / allowed-domain join requests
-  'upgrade_requests', // requestUpgrade / changePlan
-  'plan_changed_time', // changePlan
   'groups', // createGroup / updateGroup / deleteGroup (members only, group owners)
   'custom_emojis', // addCustomEmoji / editCustomEmoji / removeCustomEmoji
   'invite_link_enabled', // setInviteLinkEnabled

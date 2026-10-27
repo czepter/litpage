@@ -6,6 +6,7 @@ import { createRoot } from 'react-dom/client';
 import { openMenu, type MenuItemDef } from '../../components/Menu.tsx';
 import { Icon } from '../../components/Icon.tsx';
 import { useUI } from '../../lib/store/ui.ts';
+import { showFeatureLevelHint } from './featureLevel.ts';
 import { getLocale, t } from '../shell/i18n.ts';
 import koBundle from '../shell/i18n.ko-KR.json';
 
@@ -254,14 +255,14 @@ export function Pills<V extends string>({ value, items, onChange, big }: { value
   );
 }
 
-/** Plan-gated hint ("<highlight>Upgrade</highlight> to …"), an upsell row: opens Explore plans. */
+/** Plan-gated hint ("<highlight>Upgrade</highlight> to …"), an upsell row: explains where the feature level is set. */
 export function Upsell({ text, onClick }: { text: string; onClick?: () => void }) {
   return (
     <div
       role="button"
       tabIndex={0}
       className="nc-set-upsell"
-      onClick={() => (onClick ? onClick() : useUI.getState().set({ settingsSection: 'plans' }))}
+      onClick={() => (onClick ? onClick() : showFeatureLevelHint())}
     >
       <Icon name="arrowInCircleUpAnimated" size={16} />
       <span>{rich(text, {}, { highlight: (c) => <span className="hl">{c}</span> })}</span>

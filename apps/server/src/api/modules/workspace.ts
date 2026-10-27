@@ -345,37 +345,15 @@ export const handlers: Record<string, Handler> = {
     if (req.requested_by) notifyWorkspaceRequestResolved({ spaceId: space.id, requesterId: req.requested_by, actorId: uid, kind: 'member', status: approve ? 'approved' : 'denied', emails: req.emails, self: !!req.self, spaceName: space.name ?? '' });
     return { userIds, recordMap: rm.map };
   },
-  requestUpgrade(ctx, { spaceId, plan, note }) {
-    const uid = requireUser(ctx);
-    const space = spaceOrThrow(spaceId);
-    if (!isSpaceMember(space, uid)) throw new ApiError('Not a member', 403);
-    if ((space.settings as any)?.allow_upgrade_requests === false) throw new ApiError('Workspace owners have turned off upgrade requests.', 403);
-    const p = String(plan ?? '');
-    if (!['plus', 'business', 'enterprise', 'lit_ai'].includes(p)) throw new ApiError('Unknown plan');
-    const list = ((space.settings as any)?.upgrade_requests ?? []) as { plan: string; requested_by: string }[];
-    if (list.some((r) => r.plan === p && r.requested_by === uid)) throw new ApiError('You already requested this upgrade.');
-    const req = { id: newId(), plan: p, note: String(note ?? '').slice(0, 500), requested_by: uid, created_time: Date.now() };
-    const settings = { ...(space.settings ?? {}), upgrade_requests: [...list, req] };
-    const recordMap = commit(uid, [{ table: 'space', record: { ...space, settings } }]);
-    notifyWorkspaceRequest({ spaceId: space.id, requesterId: uid, kind: 'upgrade', plan: p, message: req.note, requestId: req.id });
-    return { request: req, recordMap };
-  },
-  /** Simulated billing: owners switch plan tiers locally (no payment), clearing matching upgrade requests. */
+  /** Development only (e2e scripts): switch a workspace's feature level. Installs set it with NC_FEATURE_LEVEL. */
   changePlan(ctx, { spaceId, plan }) {
+    if (process.env.NODE_ENV === 'production' || process.env.NC_DEV_LOGIN_CODES !== '1') throw new ApiError('Not found', 404);
     const uid = requireUser(ctx);
     const space = spaceOrThrow(spaceId);
-    if (roleOf(space, uid) !== 'owner') throw new ApiError('Only workspace owners can change the plan.', 403);
+    if (roleOf(space, uid) !== 'owner') throw new ApiError('Only workspace owners can change the feature level.', 403);
     const p = String(plan ?? '');
-    if (!['free', 'plus', 'business', 'enterprise'].includes(p)) throw new ApiError('Unknown plan');
-    const reqs = ((space.settings as any)?.upgrade_requests ?? []) as { plan: string; requested_by?: string }[];
-    // a request is met once the workspace has that plan or a higher one; AI comes with Business and Enterprise
-    const rank: Record<string, number> = { free: 0, plus: 1, business: 2, enterprise: 3 };
-    const met = (r: { plan: string }) => (r.plan === 'lit_ai' ? rank[p] >= rank.business : (rank[r.plan] ?? 99) <= rank[p]);
-    const settings = { ...(space.settings ?? {}), upgrade_requests: reqs.filter((r) => !met(r)), plan_changed_time: Date.now() };
-    const recordMap = commit(uid, [{ table: 'space', record: { ...space, plan_type: p as SpaceRecord['plan_type'], settings } }]);
-    for (const r of reqs) {
-      if (met(r) && r.requested_by) notifyWorkspaceRequestResolved({ spaceId: space.id, requesterId: r.requested_by, actorId: uid, kind: 'upgrade', status: 'approved', plan: r.plan });
-    }
+    if (!['free', 'plus', 'business', 'enterprise'].includes(p)) throw new ApiError('Unknown feature level');
+    const recordMap = commit(uid, [{ table: 'space', record: { ...space, plan_type: p as SpaceRecord['plan_type'] } }]);
     return { recordMap };
   },
 

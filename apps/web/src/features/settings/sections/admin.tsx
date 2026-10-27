@@ -17,7 +17,7 @@ import { savePref, usePrefs } from '../userSettings.ts';
 import { retentionDurationLabel, spaceSetting, useSpaceAccess } from '../spaceSettings.ts';
 import { purgeRetentionDays, trashRetentionDays } from '@nc/shared/retention.ts';
 import { auditEventCatalog, categoryLabel, describeAuditEvent, eventLabel, nameAndEmail, type AuditCategory, type AuditEntry } from '../auditEvents.ts';
-import { requestUpgrade } from './features.tsx';
+import { showFeatureLevelHint } from '../featureLevel.ts';
 import { AgentAnalytics, SharedWithAgentFilter } from '../../agents/AgentsAdmin.tsx';
 import '../admin.css';
 
@@ -55,9 +55,8 @@ function download(url: string, filename?: string) {
   a.remove();
 }
 
-/** Enterprise upsell card shown in place of an admin tool (owners upgrade, members request). */
+/** Enterprise upsell card shown in place of an admin tool below the Enterprise feature level. */
 function EnterpriseUpsell({ title, description, points }: { title: string; description: string; points?: string[] }) {
-  const { space, owner } = useSpaceAccess();
   return (
     <div className="nc-set-ent-upsell">
       <div className="ttl">{title}</div>
@@ -68,9 +67,7 @@ function EnterpriseUpsell({ title, description, points }: { title: string; descr
         </ul>
       )}
       <div className="actions">
-        {owner
-          ? <Button variant="primary" onClick={() => useUI.getState().set({ settingsSection: 'plans' })}>{t('lp.settings.upgrade_to_enterprise', 'Upgrade to Enterprise')}</Button>
-          : <Button variant="primary" onClick={() => space && void requestUpgrade(space.id, 'enterprise')}>{t('lp.settings.request_upgrade', 'Request upgrade')}</Button>}
+        <Button variant="primary" onClick={showFeatureLevelHint}>{t('lp.settings.how_to_enable', 'How to enable')}</Button>
         {HELP_URL && <Button onClick={() => window.open(HELP_URL!, '_blank', 'noopener')}>{t('lp.settings.learn_more', 'Learn more')}</Button>}
       </div>
     </div>

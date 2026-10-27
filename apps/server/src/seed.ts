@@ -5,6 +5,7 @@ import type {
 } from '@nc/shared/records.ts';
 import type { RichText } from '@nc/shared/richtext.ts';
 import { getRecord, putRecord, tx } from './db.ts';
+import { featureLevel } from './featureLevel.ts';
 import { indexBlock } from './search.ts';
 import { dayOffset, OpsBuilder, type Spec } from './content/spec.ts';
 import { TEMPLATES } from './content/catalog.ts';
@@ -123,7 +124,7 @@ export function createWorkspace(
     const space: SpaceRecord = {
       id: spaceId, version: 0, name, icon: icon ?? '', domain: slugDomain(name), pages: [],
       permissions: [{ type: 'user_permission', role: 'owner' as any, user_id: userId, added_timestamp: now }],
-      plan_type: 'plus', created_by_id: userId, created_time: now,
+      plan_type: featureLevel(), created_by_id: userId, created_time: now,
       settings: { allow_members_to_create_pages: true, allow_guests: true, allow_public_pages: true },
       invite_link_code: newId().replace(/-/g, '').slice(0, 20),
     };
