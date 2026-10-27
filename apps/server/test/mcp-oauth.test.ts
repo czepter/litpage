@@ -9,7 +9,8 @@ import { beforeAll, describe, expect, it } from 'vitest';
 
 process.env.NC_DATA_DIR = mkdtempSync(join(tmpdir(), 'nc-mcp-oauth-test-'));
 process.env.NC_SCHEDULER = '0';
-process.env.NC_PUBLIC_URL = 'https://lit.test';
+// OAuth answers with the address the client reached, whatever NC_PUBLIC_URL (links in emails) says
+process.env.NC_PUBLIC_URL = 'https://elsewhere.test';
 
 const ORIGIN = 'https://lit.test';
 const REDIRECT = 'https://client.example/callback';

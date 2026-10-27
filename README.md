@@ -168,7 +168,7 @@ Set these as environment variables (in development, `apps/server/.env.local` is 
 |---|---|---|
 | `PORT` / `HOST` | `3001` / `127.0.0.1` | Where the server listens (the Docker image uses `0.0.0.0`). |
 | `NC_DATA_DIR` | `apps/server/data` | SQLite database and uploaded files. Mount a persistent volume here. |
-| `NC_PUBLIC_URL` | `http://127.0.0.1:5173` | Public address, used in links inside emails and as the MCP OAuth issuer (without it, OAuth uses the address of each request). |
+| `NC_PUBLIC_URL` | `http://127.0.0.1:5173` | Public address, used in links inside emails. |
 | `NC_BOOTSTRAP_EMAIL`, `NC_BOOTSTRAP_PASSWORD` | unset | Creates the first account on a fresh production install. |
 | `NC_FEATURE_LEVEL` | `enterprise` | Which plan-dependent features every workspace gets: `free`, `pro`, `business` or `enterprise`. There is no billing; existing workspaces move to this level when the server starts. |
 | `NC_DEMO_MODE` | unset | Set to `1` for a hardened public demo where every visitor gets a temporary workspace of their own. Account identity, workspace control, sharing, integrations, outbound actions and public exposure are blocked. |
@@ -224,8 +224,8 @@ only talk to local mock servers.
   the pages you can access, with the same permission checks as the app. Clients that support MCP authorization (Claude,
   ChatGPT, Cursor, VS Code…) only need the server URL: Litpage is its own OAuth 2.1 server (discovery under
   `/.well-known/`, dynamic client registration, PKCE), so you sign in, pick a workspace and allow access. Other clients
-  use a personal access token from Settings → Litpage MCP. Set `NC_PUBLIC_URL` in production so the OAuth addresses
-  match the public one.
+  use a personal access token from Settings → Litpage MCP. OAuth uses the address the client connected to; behind a
+  reverse proxy set `NC_TRUST_PROXY=1` so it sees the public scheme and host.
 
 ## Architecture
 
