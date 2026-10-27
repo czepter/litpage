@@ -12,6 +12,7 @@
     "start": "pnpm --filter @nc/server start",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
+    "test:unit": "pnpm --filter './packages/*' --filter './apps/*' test",
     "e2e": "pnpm --filter @nc/e2e test"
   }
 }
