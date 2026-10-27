@@ -168,7 +168,7 @@ Set these as environment variables (in development, `apps/server/.env.local` is 
 |---|---|---|
 | `PORT` / `HOST` | `3001` / `127.0.0.1` | Where the server listens (the Docker image uses `0.0.0.0`). |
 | `NC_DATA_DIR` | `apps/server/data` | SQLite database and uploaded files. Mount a persistent volume here. |
-| `NC_PUBLIC_URL` | `http://127.0.0.1:5173` | Public address, used in links inside emails. |
+| `NC_PUBLIC_URL` | `http://127.0.0.1:5173` | Public address, used in links inside emails and as the MCP OAuth issuer (without it, OAuth uses the address of each request). |
 | `NC_BOOTSTRAP_EMAIL`, `NC_BOOTSTRAP_PASSWORD` | unset | Creates the first account on a fresh production install. |
 | `NC_DEMO_MODE` | unset | Set to `1` for a hardened public demo where every visitor gets a temporary workspace of their own. Account identity, workspace control, sharing, integrations, outbound actions and public exposure are blocked. |
 | `NC_DEMO_SANDBOX_HOURS` | `4` | In demo mode, how long a visitor's workspace lives before it is deleted. |
@@ -219,8 +219,12 @@ only talk to local mock servers.
 
   The `Litpage-Version` header is optional and defaults to the current version.
 - **Webhooks** for page, database and comment events, signed with HMAC-SHA256 and retried on failure.
-- **MCP endpoint** at `/api/mcp` so AI clients that speak the Model Context Protocol can search and edit the pages you
-  can access, with the same permission checks as the app.
+- **MCP endpoint** at `/mcp` (also `/api/mcp`) so AI clients that speak the Model Context Protocol can search and edit
+  the pages you can access, with the same permission checks as the app. Clients that support MCP authorization (Claude,
+  ChatGPT, Cursor, VS Code…) only need the server URL: Litpage is its own OAuth 2.1 server (discovery under
+  `/.well-known/`, dynamic client registration, PKCE), so you sign in, pick a workspace and allow access. Other clients
+  use a personal access token from Settings → Litpage MCP. Set `NC_PUBLIC_URL` in production so the OAuth addresses
+  match the public one.
 
 ## Architecture
 

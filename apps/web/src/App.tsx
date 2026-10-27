@@ -71,7 +71,12 @@ export function App() {
       navigate('/login', { replace: true });
     }
     if (status === 'onboarding' && route.name !== 'onboarding') navigate('/onboarding', { replace: true });
-    if (status === 'ready' && (route.name === 'login' || route.name === 'signup' || route.name === 'onboarding')) navigate(takeAfterLogin() ?? '/', { replace: true });
+    if (status === 'ready' && (route.name === 'login' || route.name === 'signup' || route.name === 'onboarding')) {
+      const next = takeAfterLogin();
+      // the MCP OAuth consent page is served by the server, not the web app
+      if (next?.startsWith('/oauth/')) location.replace(next);
+      else navigate(next ?? '/', { replace: true });
+    }
   }, [status, route.name]);
 
   let body;

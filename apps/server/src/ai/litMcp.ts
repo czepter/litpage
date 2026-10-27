@@ -10,6 +10,9 @@
 // automatically), rename a client for the workspace, see who connected each client and when it was last used, and
 // disconnect one member or everyone from a client. Memory sync : lit-get-memories / lit-save-memory
 // read and append the person's AI memories (their AI instructions page) when Memories are on.
+// OAuth (ai/mcpOAuth.ts): clients that support MCP authorization sign the person in instead of pasting a token; each
+// grant is a row here too ("lp_oat_…" access tokens that expire, rotated with a refresh token), so listing,
+// revocation and the client policy treat both kinds alike. The client of an OAuth row is its registration.
 import { createHash, randomBytes } from 'node:crypto';
 import { newId } from '@nc/shared/ids.ts';
 import { isSpaceMember } from '@nc/shared/permissions.ts';
@@ -46,16 +49,20 @@ CREATE TABLE IF NOT EXISTS mcp_tokens (
 CREATE INDEX IF NOT EXISTS idx_mcp_tokens_space ON mcp_tokens(space_id, user_id);
 `);
 // MCP client of each token (added with the approved MCP clients list)
-for (const col of ['client_key TEXT', 'client_name TEXT', 'first_connected_time INTEGER']) {
+// OAuth grants (ai/mcpOAuth.ts): registered client, access token expiry, refresh token
+for (const col of ['client_key TEXT', 'client_name TEXT', 'first_connected_time INTEGER', 'oauth_client_id TEXT', 'expires_time INTEGER', 'refresh_hash TEXT', 'refresh_expires_time INTEGER']) {
   try {
     db.exec(`ALTER TABLE mcp_tokens ADD COLUMN ${col}`);
   } catch {
     /* column exists */
   }
 }
+db.exec('CREATE INDEX IF NOT EXISTS idx_mcp_tokens_refresh ON mcp_tokens(refresh_hash)');
 
 export const MCP_PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
-const hash = (t: string) => createHash('sha256').update(t).digest('hex');
+export const hash = (t: string) => createHash('sha256').update(t).digest('hex');
+/** Active tokens a person can have per workspace (access tokens and OAuth grants together). */
+export const MAX_TOKENS = 20;
 
 export interface McpTokenInfo {
   id: string;
@@ -65,6 +72,8 @@ export interface McpTokenInfo {
   userName?: string;
   createdTime: number;
   lastUsedTime: number | null;
+  /** connected through OAuth (no token to copy; the client signs in again after revocation) */
+  oauth: boolean;
 }
 
 interface TokenRow {
@@ -75,17 +84,23 @@ interface TokenRow {
   prefix: string;
   created_time: number;
   last_used_time: number | null;
+  oauth_client_id?: string | null;
+  expires_time?: number | null;
 }
 
 const info = (r: TokenRow): McpTokenInfo => ({
   id: r.id, name: r.name, prefix: r.prefix, userId: r.user_id, userName: getRecord<UserRecord>('lit_user', r.user_id)?.name, createdTime: r.created_time, lastUsedTime: r.last_used_time,
+  oauth: !!r.oauth_client_id,
 });
+
+export function activeTokenCount(userId: string, spaceId: string): number {
+  return (db.prepare('SELECT COUNT(*) AS n FROM mcp_tokens WHERE user_id = ? AND space_id = ? AND revoked_time IS NULL').get(userId, spaceId) as { n: number }).n;
+}
 
 export function createToken(userId: string, spaceId: string, name: string): { token: string; info: McpTokenInfo } {
   if (!isSpaceMember(getRecord<SpaceRecord>('space', spaceId), userId)) throw new AiError('forbidden', 'You aren’t a member of this workspace.', 403);
   if (!workspaceAiPolicy(spaceId).litMcp) throw new AiError('forbidden', 'Litpage MCP is turned off for this workspace.', 403);
-  const count = (db.prepare('SELECT COUNT(*) AS n FROM mcp_tokens WHERE user_id = ? AND space_id = ? AND revoked_time IS NULL').get(userId, spaceId) as { n: number }).n;
-  if (count >= 20) throw new AiError('bad_request', 'You can have up to 20 active tokens.', 400);
+  if (activeTokenCount(userId, spaceId) >= MAX_TOKENS) throw new AiError('bad_request', `You can have up to ${MAX_TOKENS} active tokens.`, 400);
   const token = `lp_pat_${randomBytes(24).toString('base64url')}`;
   const id = newId();
   const now = Date.now();
@@ -130,7 +145,7 @@ export interface McpCatalogClient {
 
 /** MCP client catalog; matched against the name a client reports during initialize. */
 export const MCP_CLIENT_CATALOG: McpCatalogClient[] = [
-  { key: 'claude', name: 'Claude', caption: 'Ask Claude to work with your Litpage pages.', match: /^claude\b|^claude[-_ ]|anthropic/i },
+  { key: 'claude', name: 'Claude', caption: 'Ask Claude to work with your Litpage pages.', match: /^claude(ai)?\b|^claude[-_ .]|anthropic/i },
   { key: 'chatgpt', name: 'ChatGPT', caption: 'Bring Litpage notes into ChatGPT research.', match: /chatgpt|openai/i },
   { key: 'cursor', name: 'Cursor', caption: 'Find Litpage tasks and docs while you code.', match: /^cursor/i },
   { key: 'vscode', name: 'VS Code', caption: 'Give your coding workspace useful Litpage context.', match: /visual studio code|vs ?code/i },
@@ -199,8 +214,9 @@ function tokenClient(tokenId: string): { key: string | null; name: string | null
 /** initialize: remember the client, audit its first connection, approve clients workspace owners connect. */
 function noteClient(auth: McpAuth, clientInfo: unknown) {
   const reported = typeof (clientInfo as { name?: unknown } | undefined)?.name === 'string' ? String((clientInfo as { name: string }).name) : '';
-  const id = identifyClient(reported);
-  const before = db.prepare('SELECT client_key, first_connected_time FROM mcp_tokens WHERE id = ?').get(auth.tokenId) as { client_key: string | null; first_connected_time: number | null } | undefined;
+  const before = db.prepare('SELECT client_key, client_name, first_connected_time, oauth_client_id FROM mcp_tokens WHERE id = ?').get(auth.tokenId) as { client_key: string | null; client_name: string | null; first_connected_time: number | null; oauth_client_id: string | null } | undefined;
+  // an OAuth grant keeps the client it was authorized for, whatever initialize reports
+  const id = before?.oauth_client_id && before.client_key ? { key: before.client_key, name: before.client_name ?? before.client_key } : identifyClient(reported);
   const now = Date.now();
   db.prepare('UPDATE mcp_tokens SET client_key = ?, client_name = ?, first_connected_time = COALESCE(first_connected_time, ?) WHERE id = ?').run(id.key, id.name, now, auth.tokenId);
   if (!before?.first_connected_time || before.client_key !== id.key) {
@@ -216,18 +232,23 @@ function noteClient(auth: McpAuth, clientInfo: unknown) {
   }
 }
 
+export const CLIENT_NOT_APPROVED = 'This MCP client isn’t approved for this workspace. Ask a workspace owner to add it to the approved MCP clients.';
+
+/** "Approved MCP clients only" lets this person use the client with key `key` in the workspace. */
+export function clientAllowed(spaceId: string, userId: string, key: string): boolean {
+  const space = getRecord<SpaceRecord>('space', spaceId);
+  const pol = clientPolicy(space);
+  return !pol.restricted || isSpaceOwner(space, userId) || pol.approved.some((a) => a.key === key);
+}
+
 /**
- * Why calls from this token's client are blocked (null = allowed). The client is the name it reported in initialize:
- * without OAuth client registration (approval is bound to the registered client) the clone can't verify it, so
- * "Approved MCP clients only" steers well-behaved clients — the security boundary is the access token itself (its
- * user's permissions, the workspace switch, revocation; ).
+ * Why calls from this token's client are blocked (null = allowed). For an access token the client is the name it
+ * reported in initialize, which can't be verified, so "Approved MCP clients only" steers well-behaved clients — the
+ * security boundary is the access token itself (its user's permissions, the workspace switch, revocation). An OAuth
+ * grant is bound to the client the person authorized (its registered name, checked again at consent).
  */
 function clientBlocked(auth: McpAuth): string | null {
-  const space = getRecord<SpaceRecord>('space', auth.spaceId);
-  const pol = clientPolicy(space);
-  if (!pol.restricted || isSpaceOwner(space, auth.userId)) return null;
-  const key = tokenClient(auth.tokenId).key ?? 'unknown';
-  return pol.approved.some((a) => a.key === key) ? null : 'This MCP client isn’t approved for this workspace. Ask a workspace owner to add it to the approved MCP clients.';
+  return clientAllowed(auth.spaceId, auth.userId, tokenClient(auth.tokenId).key ?? 'unknown') ? null : CLIENT_NOT_APPROVED;
 }
 
 export interface McpClientRow {
@@ -396,11 +417,12 @@ export function personalTokenBlocked(auth: McpAuth): string | null {
   return clientBlocked(auth);
 }
 
+/** Bearer header → token (personal "lp_pat_…" or an unexpired OAuth "lp_oat_…" access token). */
 function tokenAuth(header: string | undefined): { tokenId: string; userId: string; spaceId: string } | null {
-  const m = /^Bearer\s+(lp_pat_[A-Za-z0-9_-]{20,})$/.exec(header?.trim() ?? '');
+  const m = /^Bearer\s+(lp_(?:pat|oat)_[A-Za-z0-9_-]{20,})$/i.exec(header?.trim() ?? '');
   if (!m) return null;
   const r = db.prepare('SELECT * FROM mcp_tokens WHERE token_hash = ? AND revoked_time IS NULL').get(hash(m[1])) as TokenRow | undefined;
-  if (!r) return null;
+  if (!r || (r.expires_time != null && r.expires_time <= Date.now())) return null;
   if (!isSpaceMember(getRecord<SpaceRecord>('space', r.space_id), r.user_id)) return null;
   db.prepare('UPDATE mcp_tokens SET last_used_time = ? WHERE id = ?').run(Date.now(), r.id);
   return { tokenId: r.id, userId: r.user_id, spaceId: r.space_id };
@@ -593,11 +615,17 @@ export interface McpHttpResult {
   headers?: Record<string, string>;
 }
 
-/** POST /api/mcp — authenticate, rate limit, dispatch (single message or batch). */
-export async function handleMcpHttp(authorization: string | undefined, body: unknown, sessionId?: string): Promise<McpHttpResult> {
+/**
+ * POST /api/mcp — authenticate, rate limit, dispatch (single message or batch). `resourceMetadata`: URL of the
+ * OAuth protected resource metadata, announced on 401 so MCP clients can start the OAuth flow (RFC 9728).
+ */
+export async function handleMcpHttp(authorization: string | undefined, body: unknown, sessionId?: string, resourceMetadata?: string): Promise<McpHttpResult> {
   if (isDemoMode()) return { status: 403, body: { jsonrpc: '2.0', id: null, error: { code: -32003, message: DEMO_MESSAGE } } };
   const auth = tokenAuth(authorization);
-  if (!auth) return { status: 401, body: { jsonrpc: '2.0', id: null, error: { code: -32001, message: 'Unauthorized: create an access token in Settings → Litpage MCP.' } }, headers: { 'www-authenticate': 'Bearer realm="Litpage MCP"' } };
+  if (!auth) {
+    const challenge = ['realm="Litpage MCP"', ...(resourceMetadata ? [`resource_metadata="${resourceMetadata}"`] : []), ...(authorization ? ['error="invalid_token"'] : [])].join(', ');
+    return { status: 401, body: { jsonrpc: '2.0', id: null, error: { code: -32001, message: 'Unauthorized: sign in with OAuth or create an access token in Settings → Litpage MCP.' } }, headers: { 'www-authenticate': `Bearer ${challenge}` } };
+  }
   if (!workspaceAiPolicy(auth.spaceId).litMcp) return { status: 403, body: { jsonrpc: '2.0', id: null, error: { code: -32003, message: 'Litpage MCP is turned off for this workspace.' } } };
   if (!hit(`mcp:token:${auth.tokenId}`, Number(process.env.NC_MCP_RATE_PER_MIN) || 180, 60_000)) {
     return { status: 429, body: { jsonrpc: '2.0', id: null, error: { code: -32029, message: 'There are too many requests right now. Try again shortly.' } } };

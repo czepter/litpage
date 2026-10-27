@@ -234,7 +234,7 @@ export function AiWorkspaceControls() {
 
 
 
-interface TokenInfo { id: string; name: string; prefix: string; userId: string; userName?: string; createdTime: number; lastUsedTime: number | null }
+interface TokenInfo { id: string; name: string; prefix: string; userId: string; userName?: string; createdTime: number; lastUsedTime: number | null; oauth?: boolean }
 
 
 export function LitMcpAccess() {
@@ -277,7 +277,7 @@ export function LitMcpAccess() {
   };
   return (
     <div className="nc-ai-set" data-testid="lit-mcp-access">
-      <Group plain title="Connect with an access token" description="Any MCP client can use this workspace through the Litpage MCP server with a personal access token. Tools act as you, with your permissions.">
+      <Group plain title="Connect with an access token" description="Add the server URL to any MCP client. Clients that support OAuth (Claude, ChatGPT, Cursor, VS Code…) ask you to sign in and pick a workspace; others use a personal access token. Tools act as you, with your permissions.">
         <Row label="Server URL" description={<code className="nc-ai-set-code">{serverUrl}</code>} control={<Button small onClick={() => { void navigator.clipboard?.writeText(serverUrl).catch(() => {}); useUI.getState().toast('Copied'); }}>Copy</Button>} />
         {owner && (
           <Row
@@ -304,7 +304,7 @@ export function LitMcpAccess() {
             <thead><tr><th>Name</th><th>Token</th><th>Created</th><th>Last used</th><th /></tr></thead>
             <tbody>
               {tokens.map((t) => (
-                <tr key={t.id}><td>{t.name}</td><td><code>{t.prefix}…</code></td><td>{fmtTime(t.createdTime)}</td><td>{fmtTime(t.lastUsedTime)}</td><td><Button small variant="danger" onClick={() => void revoke(t)}>Revoke</Button></td></tr>
+                <tr key={t.id}><td>{t.name}</td><td>{t.oauth ? 'OAuth' : <code>{t.prefix}…</code>}</td><td>{fmtTime(t.createdTime)}</td><td>{fmtTime(t.lastUsedTime)}</td><td><Button small variant="danger" onClick={() => void revoke(t)}>Revoke</Button></td></tr>
               ))}
             </tbody>
           </table>

@@ -11,6 +11,10 @@ export default defineConfig({
       '/files': api,
       
       '^/v1/': api,
+      // MCP and its OAuth server (apps/server/src/ai/mcpOAuth.ts)
+      '^/mcp$': api,
+      '/oauth/': api,
+      '/.well-known/oauth-': api,
       '/ws': { target: api.replace(/^http/, 'ws'), ws: true },
     },
   },

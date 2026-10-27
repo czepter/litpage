@@ -148,7 +148,7 @@ pnpm build && pnpm start
 |---|---|---|
 | `PORT` / `HOST` | `3001` / `127.0.0.1` | 서버가 받는 주소(Docker 이미지는 `0.0.0.0`) |
 | `NC_DATA_DIR` | `apps/server/data` | SQLite 데이터베이스와 올린 파일. 여기에 영구 볼륨을 연결합니다. |
-| `NC_PUBLIC_URL` | `http://127.0.0.1:5173` | 공개 주소. 메일 속 링크에 씁니다. |
+| `NC_PUBLIC_URL` | `http://127.0.0.1:5173` | 공개 주소. 메일 속 링크와 MCP OAuth 발급자 주소에 씁니다(없으면 OAuth는 요청 주소를 씁니다). |
 | `NC_BOOTSTRAP_EMAIL`, `NC_BOOTSTRAP_PASSWORD` | 없음 | 새로 설치한 프로덕션에서 첫 계정을 만듭니다. |
 | `NC_DEMO_MODE` | 없음 | `1`로 설정하면 방문자마다 임시 워크스페이스를 주는 공개 데모를 켭니다. 계정 정보, 워크스페이스 관리, 공유, 연동, 외부 동작, 공개 노출을 막습니다. |
 | `NC_DEMO_SANDBOX_HOURS` | `4` | 데모 모드에서 방문자 워크스페이스가 삭제되기까지의 시간입니다. |
@@ -196,7 +196,7 @@ pnpm build && pnpm start
 
   `Litpage-Version` 헤더는 선택이며, 빼면 현재 버전을 씁니다.
 - **웹훅**: 페이지, 데이터베이스, 댓글 이벤트. HMAC-SHA256으로 서명하고 실패하면 다시 보냅니다.
-- **MCP 엔드포인트**(`/api/mcp`): Model Context Protocol을 쓰는 AI 클라이언트가 내가 접근할 수 있는 페이지를 찾고 고칠 수 있습니다. 앱과 같은 권한 검사를 거칩니다.
+- **MCP 엔드포인트**(`/mcp`, `/api/mcp`): Model Context Protocol을 쓰는 AI 클라이언트가 내가 접근할 수 있는 페이지를 찾고 고칠 수 있습니다. 앱과 같은 권한 검사를 거칩니다. MCP 인증을 지원하는 클라이언트(Claude, ChatGPT, Cursor, VS Code 등)는 서버 URL만 있으면 됩니다. Litpage가 OAuth 2.1 서버(`/.well-known/` 탐색, 동적 클라이언트 등록, PKCE) 역할을 하므로 로그인하고 워크스페이스를 고른 뒤 접근을 허용하면 됩니다. 다른 클라이언트는 설정 → Litpage MCP에서 만든 개인 액세스 토큰을 씁니다. 프로덕션에서는 OAuth 주소가 공개 주소와 맞도록 `NC_PUBLIC_URL`을 설정하세요.
 
 ## 구조
 

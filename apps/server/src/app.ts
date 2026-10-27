@@ -20,6 +20,7 @@ import { extraHandlers } from './api/extra.ts';
 import { registerAiRoutes } from './aiStream.ts';
 import { registerMailRoutes } from './mail.ts';
 import { registerPublicApi } from './publicApi/routes.ts';
+import { OAUTH_CROSS_ORIGIN, registerMcpOAuth } from './ai/mcpOAuth.ts';
 import { cleanFileName, cleanMime, fileHeaders, fileRow, storeFile } from './content/files.ts';
 import { hit } from './ratelimit.ts';
 import { audit } from './audit.ts';
@@ -90,7 +91,8 @@ export const app = new Hono();
 // ---------------------------------------------------------------- security headers + CSRF
 app.use('*', async (c, next) => {
   const m = c.req.method;
-  if (m !== 'GET' && m !== 'HEAD' && m !== 'OPTIONS') {
+  // OAuth token / registration / revocation endpoints are called by MCP clients from anywhere and use no cookies
+  if (m !== 'GET' && m !== 'HEAD' && m !== 'OPTIONS' && !OAUTH_CROSS_ORIGIN.test(c.req.path)) {
     // state-changing requests must come from this app: Fetch Metadata first, Origin as fallback for older browsers
     const site = c.req.header('sec-fetch-site');
     const fwdHost = TRUST_PROXY ? c.req.header('x-forwarded-host') : undefined;
@@ -151,6 +153,8 @@ app.post('/api/rpc/:name', bodyLimit({ maxSize: MAX_JSON_BYTES, onError: tooLarg
 
 // AI streaming (SSE): POST /api/ai/stream
 registerAiRoutes(app);
+// OAuth for MCP clients: /.well-known/oauth-*, /oauth/* (ai/mcpOAuth.ts)
+registerMcpOAuth(app);
 // dev mail outbox viewer: GET /api/dev/mail (404 in production)
 registerMailRoutes(app);
 // public REST API for connections and personal access tokens: /v1/* (publicApi/routes.ts)
