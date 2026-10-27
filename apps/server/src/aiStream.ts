@@ -20,6 +20,7 @@ import {
   executeChatTurn, executeSimple, parseChatParams, prepareAiBlock, prepareChatTurn, prepareWriter, type TurnEvents,
 } from './ai/service.ts';
 import { handleMcpHttp } from './ai/litMcp.ts';
+import { resourceMetadataUrl } from './ai/mcpOAuth.ts';
 import { executeAgentChat, prepareAgentChat } from './agents/runs.ts';
 import { installAutofillHook } from './ai/autofillAuto.ts';
 import { messageJson } from './api/modules/ai.ts';
@@ -126,7 +127,7 @@ export function registerAiRoutes(app: Hono) {
     } catch {
       return c.json({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } }, 400);
     }
-    const r = await handleMcpHttp(c.req.header('authorization'), body, c.req.header('mcp-session-id'));
+    const r = await handleMcpHttp(c.req.header('authorization'), body, c.req.header('mcp-session-id'), resourceMetadataUrl(c, c.req.path === '/mcp' ? '/mcp' : '/api/mcp'));
     if (r.body === undefined) return c.body(null, r.status as any, r.headers);
     return c.json(r.body, r.status as any, r.headers);
   };
