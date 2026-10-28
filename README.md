@@ -223,8 +223,11 @@ only talk to local mock servers.
 - **MCP endpoint** at `/mcp` (also `/api/mcp`) so AI clients that speak the Model Context Protocol can search and edit
   the pages you can access, with the same permission checks as the app. Clients that support MCP authorization (Claude,
   ChatGPT, Cursor, VS Code…) only need the server URL: Litpage is its own OAuth 2.1 server (discovery under
-  `/.well-known/`, dynamic client registration, PKCE), so you sign in, pick a workspace and allow access. Other clients
-  use a personal access token from Settings → Litpage MCP. OAuth uses the address the client connected to; behind a
+  `/.well-known/`, dynamic client registration, PKCE), so you sign in, pick one or more workspaces and allow access. Other clients
+  use a personal access token from Settings → Litpage MCP. One connection can reach several of your workspaces: add or
+  remove them later under Settings → Litpage MCP → Workspaces, without connecting the client again (useful where a
+  client allows only one connector per server URL). Each tool call works in the workspace of the page it names, or the
+  one given as `workspace_id`; `lit-get-self` lists them. OAuth uses the address the client connected to; behind a
   reverse proxy set `NC_TRUST_PROXY=1` so it sees the public scheme and host.
   Edits can be partial (replace a phrase inside a block, insert after a passage, replace a range) or cover many database
   rows at once (`lit-update-rows`). Every edit from AI chat, agents or MCP saves the page's previous state as a version

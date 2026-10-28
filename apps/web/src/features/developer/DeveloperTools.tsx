@@ -194,7 +194,7 @@ function TokensTab() {
               <td>{t('lp.developer.active', 'Active')}</td>
               <td>
                 <Button small variant="ghost" onClick={async () => {
-                  await api('mcpRevokeToken', { tokenId: p.id });
+                  await api('mcpRevokeToken', { tokenId: p.id, spaceId });
                   useUI.getState().toast(t('lp.developer.token_revoked', 'Token revoked'));
                   load();
                 }}>{t('lp.developer.revoke', 'Revoke')}</Button>
