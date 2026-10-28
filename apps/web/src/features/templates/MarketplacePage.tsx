@@ -11,7 +11,7 @@ import { useCurrentSpace } from '../../lib/hooks.ts';
 import { useUI } from '../../lib/store/ui.ts';
 import { Icon } from '../../components/Icon.tsx';
 import { openMenu } from '../../components/Menu.tsx';
-import { t } from '../shell/i18n.ts';
+import { getLocale, t } from '../shell/i18n.ts';
 import { addTemplate, categoryLabel, CATEGORY_ORDER, sectionTitle, useTemplates, type TemplateCategory, type TemplateInfo } from './api.ts';
 import { TemplateThumb } from './TemplateThumb.tsx';
 import { TemplatePreview } from './TemplatePreview.tsx';
@@ -512,11 +512,12 @@ function TemplateDetail({ tpl, all, onBack, onOpen }: { tpl: TemplateInfo; all: 
   );
 }
 
+/** "3 days ago" in the UI locale ("vor 3 Tagen", "3일 전"); "today" under a day. */
 function agoWords(ms: number): string {
   const d = Math.max(0, Math.floor((Date.now() - ms) / 86400000));
   if (d < 1) return t('lp.templates.today', 'today');
-  const unit = d >= 365 ? [Math.floor(d / 365), 'year'] : d >= 30 ? [Math.floor(d / 30), 'month'] : d >= 7 ? [Math.floor(d / 7), 'week'] : [d, 'day'];
-  return `${unit[0]} ${unit[1]}${unit[0] === 1 ? '' : 's'}`;
+  const [n, unit]: [number, Intl.RelativeTimeFormatUnit] = d >= 365 ? [Math.floor(d / 365), 'year'] : d >= 30 ? [Math.floor(d / 30), 'month'] : d >= 7 ? [Math.floor(d / 7), 'week'] : [d, 'day'];
+  return new Intl.RelativeTimeFormat(getLocale(), { numeric: 'always' }).format(-n, unit);
 }
 
 /** Template page stat row: rating, downloads, ranking in its category, version update. */
@@ -533,7 +534,7 @@ function DetailStats({ tpl, all }: { tpl: TemplateInfo; all: TemplateInfo[] }) {
   }
   stats.push({ id: 'downloads', title: compact(tpl.adds ?? 0), sub: t('lp.templates.downloads', 'Downloads') });
   if (rank > 0 && (tpl.adds ?? 0) > 0) stats.push({ id: 'ranking', title: t('lp.templates.in', '#{ranking} in {categoryName}', { ranking: rank, categoryName: categoryLabel(tpl.category) }), sub: t('lp.templates.ranking', 'Ranking') });
-  if (tpl.updatedTime) stats.push({ id: 'updated', title: t('lp.templates.ago', '{messageOfTimestampMs} ago', { messageOfTimestampMs: agoWords(tpl.updatedTime) }), sub: t('lp.templates.version_update', 'Version update') });
+  if (tpl.updatedTime) stats.push({ id: 'updated', title: agoWords(tpl.updatedTime), sub: t('lp.templates.version_update', 'Version update') });
   return (
     <div className="nc-mkt-stats" data-testid="template-stats">
       {stats.map((x) => (
