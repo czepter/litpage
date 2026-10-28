@@ -15,8 +15,10 @@
 // revocation and the client policy treat both kinds alike. The client of an OAuth row is its registration.
 // More workspaces: a connection belongs to the workspace it was made in (its home, mcp_tokens.space_id) and can reach
 // more of its person's workspaces (mcp_token_spaces) — chosen at OAuth consent or added later in Settings → Litpage
-// MCP, so one MCP client connector (one server URL) works across workspaces. Each call works in one workspace: the
-// tools' optional workspace_id, else the workspace of the page or database it names, else the home; that
+// MCP, so one MCP client connector (one server URL) works across workspaces. initialize's instructions and the
+// tools' workspace_id name every workspace the connection reaches. Each call works in one workspace: workspace_id or
+// a parent {type: "workspace"} (the top level of that workspace), else the workspace of the page, database or team it
+// names, else the home; lit-search without one searches them all, and results name their workspace. That
 // workspace's "Allow Litpage MCP" and approved clients apply to the call. Owners of a workspace the connection was
 // added to see it in their lists; revoking it there removes only that workspace from the connection.
 import { createHash, randomBytes } from 'node:crypto';
@@ -605,19 +607,80 @@ function spaceOfArgs(auth: McpAuth, args: Record<string, unknown>): string | nul
   return null;
 }
 
-/** The workspace a call works in: workspace_id (id or name), else the workspace of the page it names, else the home. */
-function callSpace(auth: McpAuth, args: Record<string, unknown>): { spaceId: string } | { error: string } {
-  const asked = typeof args.workspace_id === 'string' ? args.workspace_id.trim() : '';
-  if (asked) {
-    const want = asked.toLowerCase();
-    const hit = auth.spaces.find((id) => id === asked) ?? auth.spaces.find((id) => (getRecord<SpaceRecord>('space', id)?.name ?? '').trim().toLowerCase() === want);
-    if (!hit) return { error: `This connection can’t reach the workspace “${asked.slice(0, 80)}”. lit-get-self lists the workspaces it can reach; add more in Litpage under Settings → Litpage MCP.` };
-    return { spaceId: hit };
-  }
-  return { spaceId: spaceOfArgs(auth, args) ?? auth.spaceId };
+/** A workspace of this connection by id or name (null = it doesn't reach one by that name). */
+function findSpace(auth: McpAuth, asked: string): string | null {
+  const want = asked.trim().toLowerCase();
+  return auth.spaces.find((id) => id === asked.trim()) ?? auth.spaces.find((id) => (getRecord<SpaceRecord>('space', id)?.name ?? '').trim().toLowerCase() === want) ?? null;
 }
 
-const WORKSPACE_ARG = { type: 'string', description: 'The workspace to work in: its id or name from lit-get-self. Leave it out to use the workspace of the page or database you name, or else the connection’s main workspace.' };
+const notReached = (asked: string) => `This connection can’t reach the workspace “${asked.slice(0, 80)}”. lit-get-self lists the workspaces it can reach; add more in Litpage under Settings → Litpage MCP.`;
+
+/** Where pages go at the top level of a workspace: its general (default) team, else the person's private pages. */
+function topLevelParent(spaceId: string): Record<string, unknown> {
+  const team = (getRecord<SpaceRecord>('space', spaceId)?.default_team_ids ?? []).find((id) => getRecord<TeamRecord>('team', id)?.alive !== false && getRecord<TeamRecord>('team', id));
+  return team ? { type: 'teamspace', id: team } : { type: 'private' };
+}
+
+interface CallSpace {
+  spaceId: string;
+  /** asked: workspace_id or a workspace parent; args: the page, database or team the call names; default: the main workspace */
+  how: 'asked' | 'args' | 'default';
+  /** the arguments for the tool: without workspace_id, workspace parents turned into the workspace's top level */
+  args: Record<string, unknown>;
+}
+
+/**
+ * The workspace a call works in: workspace_id or a parent {type: "workspace"} (id or name), else the workspace of the
+ * page, database or team the arguments name, else the main workspace.
+ */
+function callSpace(auth: McpAuth, raw: Record<string, unknown>): CallSpace | { error: string } {
+  const { workspace_id: wsArg, ...args } = raw;
+  let asked: string | null = null;
+  if (typeof wsArg === 'string' && wsArg.trim()) {
+    asked = findSpace(auth, wsArg);
+    if (!asked) return { error: notReached(wsArg) };
+  }
+  for (const key of ['parent', 'new_parent']) {
+    const p = args[key] as { type?: unknown; id?: unknown } | undefined;
+    if (!p || typeof p !== 'object' || p.type !== 'workspace') continue;
+    const name = typeof p.id === 'string' && p.id.trim() ? p.id : null;
+    const ws = name ? findSpace(auth, name) : asked ?? auth.spaceId;
+    if (!ws) return { error: notReached(String(name)) };
+    if (asked && ws !== asked) return { error: 'The parent workspace and workspace_id name different workspaces.' };
+    asked = ws;
+    args[key] = topLevelParent(ws);
+  }
+  if (asked) return { spaceId: asked, how: 'asked', args };
+  const fromArgs = spaceOfArgs(auth, args);
+  return fromArgs ? { spaceId: fromArgs, how: 'args', args } : { spaceId: auth.spaceId, how: 'default', args };
+}
+
+const spaceLabel = (id: string) => `${getRecord<SpaceRecord>('space', id)?.name || 'Untitled workspace'} (id ${id})`;
+
+/** The workspace_id argument, naming the workspaces of the connection. */
+const workspaceArg = (ids: string[]) => ({
+  type: 'string',
+  description: `The workspace to work in, by id or name. This connection reaches: ${ids.map(spaceLabel).join('; ')}. Leave it out to use the workspace of the page, database or team you name, or else ${getRecord<SpaceRecord>('space', ids[0])?.name || 'the first one'}${ids.length > 1 ? ' (lit-search then searches all of them)' : ''}.`,
+});
+
+/** parent / new_parent with the extra type "workspace": the top level of one of the connection's workspaces. */
+function withWorkspaceParent(schema: Record<string, unknown>): Record<string, unknown> {
+  const props = { ...(schema.properties as Record<string, unknown> ?? {}) };
+  for (const key of ['parent', 'new_parent']) {
+    const p = props[key] as { properties?: Record<string, any>; description?: string } | undefined;
+    if (!p?.properties?.type) continue;
+    props[key] = {
+      ...p,
+      description: `${p.description ?? ''} {"type": "workspace", "id": <workspace id or name>} = the top level of that workspace.`.trim(),
+      properties: {
+        ...p.properties,
+        type: { ...p.properties.type, enum: [...(p.properties.type.enum ?? []), 'workspace'] },
+        id: { ...p.properties.id, description: 'page_id, database_id, teamspace_id, or the workspace id or name (omit for private).' },
+      },
+    };
+  }
+  return { ...schema, properties: props };
+}
 
 // ---------------------------------------------------------------------------------------------
 // Tools (MCP names → agent registry)
@@ -671,12 +734,13 @@ function schemaFor(t: McpToolDef): Record<string, unknown> {
  *  an optional workspace_id, so workspaces added to the connection later work without reconnecting. */
 export function mcpToolList(spaceIds: string | string[]): Record<string, unknown>[] {
   const ids = Array.isArray(spaceIds) ? spaceIds : [spaceIds];
-  const withWorkspace = (schema: Record<string, unknown>) => ({ ...schema, properties: { ...(schema.properties as Record<string, unknown> ?? {}), workspace_id: WORKSPACE_ARG } });
+  const ws = workspaceArg(ids);
+  const withWorkspace = (schema: Record<string, unknown>) => ({ ...schema, properties: { ...(schema.properties as Record<string, unknown> ?? {}), workspace_id: ws } });
   const out: Record<string, unknown>[] = MCP_TOOLS.map((t) => ({
     name: t.name,
     title: t.title,
     description: TOOL_DEFS.find((d) => d.name === t.agent)!.description,
-    inputSchema: withWorkspace(schemaFor(t)),
+    inputSchema: withWorkspace(withWorkspaceParent(schemaFor(t))),
     annotations: { title: t.title, readOnlyHint: t.readOnly, destructiveHint: !!t.destructive, openWorldHint: false },
   }));
   const none = { type: 'object', properties: {}, additionalProperties: false };
@@ -703,11 +767,46 @@ async function callTool(conn: McpAuth, name: string, rawArgs: Record<string, unk
   }
   const where = callSpace(conn, rawArgs);
   if ('error' in where) return text(where.error, true);
+  const usable = usableSpaces(conn);
+  // no workspace named: search them all
+  if (name === 'lit-search' && where.how === 'default' && usable.length > 1) {
+    const parts: string[] = [];
+    let found = false;
+    for (const id of usable) {
+      const r = await runAgentTool({ userId: conn.userId, spaceId: id }, 'search_workspace', where.args);
+      found ||= !r.isError;
+      parts.push(`## Workspace: ${spaceLabel(id)}\n\n${r.content.replace(/^Source \[\d+\]\n?/gm, '').trim()}`);
+    }
+    return text(parts.join('\n\n'), !found);
+  }
   const problem = callProblem(conn, where.spaceId);
   if (problem) return text(`${getRecord<SpaceRecord>('space', where.spaceId)?.name || 'Workspace'}: ${problem}`, true);
-  const { workspace_id: _workspace, ...args } = rawArgs;
-  void _workspace;
-  const auth = { userId: conn.userId, spaceId: where.spaceId };
+  const out = await callInSpace({ userId: conn.userId, spaceId: where.spaceId }, name, where.args);
+  // with more than one workspace, say which one the call worked in
+  return conn.spaces.length > 1 ? { ...out, content: [{ type: 'text', text: `Workspace: ${spaceLabel(where.spaceId)}\n\n${out.content[0]?.text ?? ''}` }] } : out;
+}
+
+/** An agent tool as the person in one workspace (MCP clients ask their own users before calling tools). */
+function runAgentTool(auth: { userId: string; spaceId: string }, agent: string, input: Record<string, unknown>) {
+  const env: AgentEnv = {
+    userId: auth.userId,
+    spaceId: auth.spaceId,
+    threadId: null,
+    turnId: `mcp-${newId()}`,
+    currentPageId: null,
+    approvalMode: 'skip_all',
+    memories: false,
+    cite: () => 0,
+    step: () => {},
+    touched: () => {},
+    approve: async () => 'accept',
+  };
+  return runTool(env, agent, input, newId());
+}
+
+/** A tool call in the workspace chosen for it. */
+async function callInSpace(auth: { userId: string; spaceId: string }, name: string, args: Record<string, unknown>): Promise<{ content: { type: 'text'; text: string }[]; isError?: boolean }> {
+  const text = (t: string, isError = false) => ({ content: [{ type: 'text' as const, text: t }], ...(isError ? { isError: true } : {}) });
   if (name === 'lit-get-memories' || name === 'lit-save-memory') {
     if (!workspaceAiPolicy(auth.spaceId).memories) return text('Memories are turned off in this workspace.', true);
     const settings = (getRecord<UserSettingsRecord>('user_settings', auth.userId)?.settings ?? {}) as Record<string, unknown>;
@@ -745,20 +844,6 @@ async function callTool(conn: McpAuth, name: string, rawArgs: Record<string, unk
       delete input[mcpName];
     }
   }
-  const env: AgentEnv = {
-    userId: auth.userId,
-    spaceId: auth.spaceId,
-    threadId: null,
-    turnId: `mcp-${newId()}`,
-    currentPageId: null,
-    // MCP clients ask their own users before calling tools (tool annotations mark the writes)
-    approvalMode: 'skip_all',
-    memories: false,
-    cite: () => 0,
-    step: () => {},
-    touched: () => {},
-    approve: async () => 'accept',
-  };
   // fetching a database id returns its rows
   let agent = def.agent;
   if (agent === 'read_page' && typeof input.page_id === 'string') {
@@ -769,7 +854,7 @@ async function callTool(conn: McpAuth, name: string, rawArgs: Record<string, unk
       delete input.page_id;
     }
   }
-  const r = await runTool(env, agent, input, newId());
+  const r = await runAgentTool(auth, agent, input);
   return text(r.content.replace(/^Source \[\d+\]\n?/gm, ''), !!r.isError);
 }
 
@@ -795,7 +880,7 @@ async function handleMessage(auth: McpAuth, m: RpcMessage): Promise<Record<strin
         protocolVersion: MCP_PROTOCOL_VERSIONS.includes(requested) ? requested : MCP_PROTOCOL_VERSIONS[0],
         capabilities: { tools: { listChanged: false } },
         serverInfo: { name: 'Litpage MCP', version: '1.0.0' },
-        instructions: 'Tools act as the connected user in their Litpage workspaces: search and fetch pages, create and update pages and databases, restore pages from Trash, and comment. A connection can reach more than one workspace: lit-get-self lists them, and workspace_id picks one (by default the workspace of the page you name, else the main workspace).',
+        instructions: `Tools act as the connected user in their Litpage workspaces: search and fetch pages, create and update pages and databases, restore pages from Trash, and comment. This connection reaches ${auth.spaces.length > 1 ? `${auth.spaces.length} workspaces` : 'one workspace'}: ${auth.spaces.map(spaceLabel).join('; ')}. Every tool takes workspace_id (id or name) to work in one of them; without it a call works in the workspace of the page, database or team it names, else in ${getRecord<SpaceRecord>('space', auth.spaceId)?.name || 'the first one'}, and lit-search searches all of them. To create at the top level of a workspace, use parent {"type": "workspace", "id": <workspace id or name>}. Results start with the workspace they worked in.`,
       });
     }
     case 'ping':

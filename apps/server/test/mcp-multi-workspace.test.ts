@@ -144,6 +144,43 @@ describe('creating pages in an added workspace', () => {
   });
 });
 
+describe('every workspace on equal terms', () => {
+  it('tells the client the workspaces, creates at a workspace’s top level, searches all of them and names the workspace', async () => {
+    const { token, info } = await call(ids.member, 'mcpCreateToken', { spaceId: ids.main, name: 'Claude equal' });
+    await call(ids.member, 'mcpSetTokenWorkspaces', { tokenId: info.id, spaceIds: [ids.second] });
+
+    const init = ((await rpc(token, 'initialize', { protocolVersion: '2025-06-18', clientInfo: { name: 'claude-ai', version: '1' } })).body as any).result;
+    expect(init.instructions).toContain('Main');
+    expect(init.instructions).toContain('Second');
+    const tools = ((await rpc(token, 'tools/list')).body as any).result.tools as { name: string; inputSchema: any }[];
+    const create = tools.find((t) => t.name === 'lit-create-pages')!.inputSchema;
+    expect(create.properties.parent.properties.type.enum).toContain('workspace');
+    expect(create.properties.workspace_id.description).toContain(ids.second);
+    expect(tools.find((t) => t.name === 'lit-move-pages')!.inputSchema.properties.new_parent.properties.type.enum).toContain('workspace');
+
+    // the top level of a workspace, by name or id
+    const byName = await toolCall(token, 'lit-create-pages', { parent: { type: 'workspace', id: 'second' }, pages: [{ title: 'Top level by name' }] });
+    expect(byName.isError).toBeFalsy();
+    expect(byName.content[0].text).toMatch(/^Workspace: Second/);
+    const team = db.getRecord<any>('space', ids.second).default_team_ids[0];
+    expect(db.getRecord<any>('team', team).team_pages.map((id: string) => db.getRecord<any>('block', id)?.properties?.title?.[0]?.[0])).toContain('Top level by name');
+    const byId = await toolCall(token, 'lit-create-pages', { parent: { type: 'workspace', id: ids.main }, pages: [{ title: 'Top level by id' }] });
+    expect(byId.content[0].text).toMatch(/^Workspace: Main/);
+    const clash = await toolCall(token, 'lit-create-pages', { workspace_id: ids.main, parent: { type: 'workspace', id: ids.second }, pages: [{ title: 'x' }] });
+    expect(clash.isError).toBe(true);
+
+    // no workspace named: every workspace is searched
+    const found = (await toolCall(token, 'lit-search', { query: 'Top level' })).content[0].text;
+    expect(found).toContain('## Workspace: Main');
+    expect(found).toContain('## Workspace: Second');
+    expect(found).toContain('Top level by name');
+    expect(found).toContain('Top level by id');
+    const one = (await toolCall(token, 'lit-search', { query: 'Top level', workspace_id: 'Second' })).content[0].text;
+    expect(one).toContain('Top level by name');
+    expect(one).not.toContain('Top level by id');
+  });
+});
+
 describe('OAuth consent', () => {
   const req = (path: string, init: RequestInit = {}) => app.request(new Request(`${ORIGIN}${path}`, init));
   const form = (data: Record<string, string> | [string, string][]) => new URLSearchParams(data).toString();
