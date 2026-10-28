@@ -4,6 +4,8 @@
 import { getBlock } from '../../lib/blocks.ts';
 import { isOpen, setOpen } from './commands.ts';
 import { toggleTodo } from './textHandlers.ts';
+import { openEquationEditor } from './blocks/equation.block.tsx';
+import { openFullScreen } from './blocks/media.block.tsx';
 
 const PAGE_TYPES = new Set(['page', 'collection_view_page']);
 const FULLSCREEN_TYPES = new Set(['image', 'video', 'pdf', 'embed', 'figma', 'loom', 'maps', 'miro', 'drive', 'tweet', 'codepen', 'excalidraw', 'framer', 'gist', 'typeform', 'whimsical']);
@@ -27,11 +29,11 @@ export function modifyBlock(blockId: string): boolean {
   }
   if (b.type === 'equation') {
     const el = document.querySelector<HTMLElement>(`[data-block-id="${blockId}"] .nc-equation-2, [data-block-id="${blockId}"] .nc-blk-placeholder`);
-    if (el) void import('./blocks/equation.block.tsx').then((m) => m.openEquationEditor(blockId, el));
+    if (el) openEquationEditor(blockId, el);
     return true;
   }
   if (FULLSCREEN_TYPES.has(b.type)) {
-    void import('./blocks/media.block.tsx').then((m) => m.openFullScreen(blockId));
+    openFullScreen(blockId);
     return true;
   }
   return false;

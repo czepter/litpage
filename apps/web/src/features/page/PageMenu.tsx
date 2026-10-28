@@ -30,6 +30,7 @@ import { backlinksMode, setBacklinksMode } from './Backlinks.tsx';
 import { connectionsMenuItem } from '../developer/PageConnections.tsx';
 import { markAsMeetingInstructions } from '../meetings/instructions.tsx';
 import { collectionAccess } from '../database/access.ts';
+import { openLayoutBuilder } from '../database/layout/openLayoutBuilder.ts';
 
 type FormatKey = 'page_small_text' | 'page_full_width' | 'block_locked' | 'page_floating_table_of_contents' | 'page_discussions';
 
@@ -202,7 +203,7 @@ export function openPageMenu(pageId: string, anchor: HTMLElement) {
         }),
         // the layout of database pages (features/database/layout): on a full-page database (not a
         // wiki's home) and on its pages; needs edit access to the database structure (openLayoutBuilder checks the lock)
-        ...(layoutSource ? [item(t('lp.page.customize_layout', 'Customize layout'), 'layout', { onSelect: () => { void import('../database/layout/openLayoutBuilder.ts').then((m) => m.openLayoutBuilder(layoutSource)); }, disabled: !collectionAccess(layoutSource).canEditStructure })] : []),
+        ...(layoutSource ? [item(t('lp.page.customize_layout', 'Customize layout'), 'layout', { onSelect: () => openLayoutBuilder(layoutSource), disabled: !collectionAccess(layoutSource).canEditStructure })] : []),
       ],
     }],
   });

@@ -32,6 +32,8 @@ import { openTextMenuAtPoint } from './inline/TextActionMenu.tsx';
 import { valueOf } from './inline/format.ts';
 import { useBlockLinkScroll } from './blockLinks.ts';
 import { clearSidebarDrop, externalBlockDropTargets, moveBlocksToPage, sidebarPageAt, type ExternalBlockDrop } from './dragToSidebar.ts';
+import { openFullScreen } from './blocks/media.block.tsx';
+import { presentFrom } from './slashItems.ts';
 
 interface Gutter {
   blockId: string;
@@ -195,10 +197,10 @@ export function EditorSurface({ pageId, readOnly, children, scroller }: { pageId
       } else if (e.key === ' ' && !mod && ids.length === 1 && getBlock(ids[0])?.type === 'image') {
         // Space opens / closes a selected image in full screen 
         e.preventDefault();
-        void import('./blocks/media.block.tsx').then((m) => m.openFullScreen(ids[0]));
+        openFullScreen(ids[0]);
       } else if (mod && e.altKey && e.code === 'KeyP') {
         e.preventDefault();
-        void import('./slashItems.ts').then((m) => m.presentFrom(ids[0]));
+        presentFrom(ids[0]);
       } else if (e.altKey && e.shiftKey && !mod && e.code === 'KeyL') {
         e.preventDefault();
         void import('../page/pageActions.ts').then((p) => p.copyPageLink(pageIdOfBlock(ids[0]) ?? ids[0], ids[0]));

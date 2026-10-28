@@ -16,6 +16,7 @@ import { createViewIn, newPropertyId } from '../actions.ts';
 import { openDatabaseTemplates } from '../../templates/dbTemplates.tsx';
 import { ViewStep } from './LinkedSourcePicker.tsx';
 import { addLinkedView } from '../sources/sources.ts';
+import { openMergeCsv } from '../../import/MergeCsv.tsx';
 
 /** The block's own, still empty data source (replaced when the database links an existing one). */
 function own(c: CollectionRecord, b: BlockRecord): boolean {
@@ -134,7 +135,7 @@ export function NewDatabasePanel({ block, collection, view, onClose }: { block: 
             <div className="nc-menu-item-inner"><span className="nc-new-db-tile"><Icon name="plusSmall" size={16} /></span><div className="nc-menu-label">New blank dataset</div></div>
           </div>
           {/*: Import CSV goes through the column mapping of Merge with CSV (features/import, /006) */}
-          <div role="menuitem" className="nc-menu-item nc-new-db-row tall" onClick={() => { onClose(); void import('../../import/MergeCsv.tsx').then((m) => m.openMergeCsv(block.id)); }}>
+          <div role="menuitem" className="nc-menu-item nc-new-db-row tall" onClick={() => { onClose(); openMergeCsv(block.id); }}>
             <div className="nc-menu-item-inner"><span className="nc-new-db-icon"><Icon name="download" size={20} /></span><div className="nc-menu-label">Import CSV</div></div>
           </div>
           <input ref={fileRef} type="file" accept=".csv,text/csv" hidden onChange={async (e) => {

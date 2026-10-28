@@ -22,6 +22,7 @@ import { choiceDialog, openMcpConnectDialog } from './dialogs.tsx';
 import { openKeyHelp } from './NoKeyNotice.tsx';
 import { CHAT_SKILL_PROMPTS } from './skills.ts';
 import { addDays, isoDate, parseNaturalDate } from '../editor/inline/dates.ts';
+import { openResourcePicker } from '../agents/ui.tsx';
 
 export interface ComposerMention {
   pageId: string;
@@ -694,7 +695,7 @@ export function ChatComposer(p: Props) {
               id: 'src-page', label: 'A page…', icon: 'page', checked: scope.kind === 'page', description: scope.kind === 'page' ? scope.title : 'A page and its sub-pages',
               onSelect: () => {
                 setTimeout(() => {
-                  void import('../agents/ui.tsx').then((m) => m.openResourcePicker(anchor, (r) => setScope({ kind: 'page', id: r.blockId, title: r.title })));
+                  openResourcePicker(anchor, (r) => setScope({ kind: 'page', id: r.blockId, title: r.title }));
                 }, 0);
               },
             },

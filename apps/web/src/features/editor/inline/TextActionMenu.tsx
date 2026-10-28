@@ -17,18 +17,19 @@ import { useUI } from '../../../lib/store/ui.ts';
 import { domText, getSelectionOffsets, offsetOf, rectsForRange, setSelectionOffsets } from '../richTextDom.ts';
 import { useEditor } from '../editorState.ts';
 import { openBlockMenu } from '../BlockMenu.tsx';
-import { startCommentOnSelection } from '../../comments/comments.tsx';
+import { addComment, startCommentOnSelection } from '../../comments/comments.tsx';
 import { clearFormatRange, colorsOf, rangeHas, toggleMarkRange, valueOf, type TextRange } from './format.ts';
 import { openColorMenu } from './ColorMenu.tsx';
 import { openLinkPopup } from './LinkPopups.tsx';
 import { convertSelectionToEquation } from './EquationEditor.tsx';
 import { openEmojiPopover } from './EmojiMenu.tsx';
 import { turnIntoItems, blockTypeLabel } from './turnInto.ts';
-import { isMac } from '../textHandlers.ts';
 import { useSkills } from '../../ai/aiStores.ts';
 import { openPage } from '../../../lib/router.ts';
 import './icons.tsx';
 import { colorToken } from '../../../lib/colorToken.ts';
+
+const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
 
 interface MenuState {
   range: TextRange | null;
@@ -549,10 +550,8 @@ function reactToSelection(r: TextRange, emoji: string) {
   window.dispatchEvent(ev);
   if ((ev.detail as any).handled) return;
   // fallback: an inline discussion whose first comment is the emoji (rendered large like emoji-only comments)
-  void import('../../comments/comments.tsx').then(({ addComment }) => {
-    const context = slice(valueOf(r.blockId, r.property), r.start, r.end);
-    addComment(r.blockId, [[emoji]], undefined, context, { annotate: { property: r.property, start: r.start, end: r.end } });
-  });
+  const context = slice(valueOf(r.blockId, r.property), r.start, r.end);
+  addComment(r.blockId, [[emoji]], undefined, context, { annotate: { property: r.property, start: r.start, end: r.end } });
 }
 
 export { useOverlays };

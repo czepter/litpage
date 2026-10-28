@@ -23,6 +23,7 @@ import { VerifiedPagesTable } from '../../page/VerifiedPagesTable.tsx';
 import { AgentsAdmin } from '../../agents/AgentsAdmin.tsx';
 import { ImageGenerationSettings } from '../../aiImage/ImageSettings.tsx';
 import { developersUrl, openDevelopers } from '../../developer/api.ts';
+import { openSiteSettings } from '../../page/SiteSettings.tsx';
 
 function closeSettings() {
   useUI.getState().set({ settingsOpen: false });
@@ -632,7 +633,7 @@ export function PublicPagesSection() {
                       <Button small onClick={() => { void navigator.clipboard?.writeText(url); useUI.getState().toast(t('lp.settings.clipboard_copy_complete', 'Clipboard copy complete')); }}>{t('lp.settings.copy_link', 'Copy link')}</Button>
                       <Button small variant="ghost" onClick={() => { closeSettings(); if (p.kind === 'form') window.open(path, '_blank'); else openPage(p.blockId); }}>{t('lp.settings.view', 'View')}</Button>
                       {p.kind === 'site' && (
-                        <Button small variant="ghost" onClick={() => { closeSettings(); openPage(p.blockId); setTimeout(() => void import('../../page/SiteSettings.tsx').then((m) => m.openSiteSettings(p.blockId)), 300); }}>{t('lp.settings.settings', 'Settings')}</Button>
+                        <Button small variant="ghost" onClick={() => { closeSettings(); openPage(p.blockId); setTimeout(() => openSiteSettings(p.blockId), 300); }}>{t('lp.settings.settings', 'Settings')}</Button>
                       )}
                     </td>
                   </tr>

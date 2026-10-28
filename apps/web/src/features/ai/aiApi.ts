@@ -4,6 +4,7 @@ import { api, clientId } from '../../lib/api.ts';
 import { useSession } from '../../lib/store/session.ts';
 import { openPage } from '../../lib/router.ts';
 import { createSseParser } from './sse.ts';
+import { openBlockLink } from '../editor/blockLinks.ts';
 
 
 export const NO_KEY_MESSAGE = 'Connect an AI provider to use Litpage AI';
@@ -143,7 +144,7 @@ export function openSource(ref: SourceRef) {
   }
   // the page scrolls to the cited block and flashes it (already open → just scroll)
   const { pageId, blockId } = ref;
-  void import('../editor/blockLinks.ts').then((m) => m.openBlockLink(pageId, blockId)).catch(() => openPage(pageId, { blockId }));
+  try { openBlockLink(pageId, blockId); } catch { openPage(pageId, { blockId }); }
 }
 
 export interface StepRef {

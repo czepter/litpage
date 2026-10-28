@@ -22,13 +22,18 @@ import { pasteIntoBlock } from './clipboard.ts';
 import { openBlockMenuFor } from './BlockMenu.tsx';
 import { stickyFormat } from './prefs.ts';
 import { applySuggestedEdit, suggestFormatRange, suggestingIn, suggestReplace } from '../comments/suggestEdits.ts';
+import { clearFormatRange, lastUsedColor, pushRecentColor, setColorRange } from './inline/format.ts';
+import { convertSelectionToEquation, insertEquationAt, openEquationEditor } from './inline/EquationEditor.tsx';
+import { startCommentOnBlock, startCommentOnSelection } from '../comments/comments.tsx';
+import { focusLinkPill, followLink, linkExtent, openLinkEdit, openLinkPopup, syncKeyboardLinkPill, useLinkHover } from './inline/LinkPopups.tsx';
+import { presentFrom } from './slashItems.ts';
 
 export const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 const mod = (e: { metaKey: boolean; ctrlKey: boolean }) => (isMac ? e.metaKey : e.ctrlKey);
 
 /** @deprecated kept for older callers — recent colors live in inline/format.ts */
 export function rememberColor(c: string) {
-  void import('./inline/format.ts').then((m) => m.pushRecentColor(c));
+  pushRecentColor(c);
 }
 
 export function commitText(blockId: string, property: string, next: RichText, caret: number, opts?: { coalesce?: boolean; action?: string; base?: RichText }) {
@@ -44,10 +49,8 @@ export function commitText(blockId: string, property: string, next: RichText, ca
 const TRIGGER_PREV = /[\s([{"'“‘]/;
 
 /** The keyboard-shown link pill is up for the link around `caret` in this leaf. */
-let linkHoverState: (() => { blockId: string; property: string; start: number; end: number; keyboard?: boolean } | null) | null = null;
-void import('./inline/LinkPopups.tsx').then((m) => { linkHoverState = () => m.useLinkHover.getState().hover; });
 function keyboardLinkAt(blockId: string, property: string, caret: number): boolean {
-  const h = linkHoverState?.();
+  const h = useLinkHover.getState().hover;
   return !!h && !!h.keyboard && h.blockId === blockId && h.property === property && caret > h.start && caret < h.end;
 }
 
@@ -201,26 +204,20 @@ export function makeTextHandlers(blockId: string, property = 'title') {
       }
       if (e.shiftKey && lower === 'h' && !isCode) {
         e.preventDefault();
-        void import('./inline/format.ts').then(({ lastUsedColor, setColorRange }) => {
-          const c = lastUsedColor();
-          if (c && !collapsed) setColorRange(range, c);
-        });
+        const c = lastUsedColor();
+        if (c && !collapsed) setColorRange(range, c);
         return;
       }
       if (e.shiftKey && lower === 'e' && !isCode) {
         e.preventDefault();
-        void import('./inline/EquationEditor.tsx').then(({ convertSelectionToEquation, insertEquationAt }) => {
-          if (collapsed) insertEquationAt(blockId, property, sel.start);
-          else convertSelectionToEquation(range);
-        });
+        if (collapsed) insertEquationAt(blockId, property, sel.start);
+        else convertSelectionToEquation(range);
         return;
       }
       if (e.shiftKey && lower === 'm') {
         e.preventDefault();
-        void import('../comments/comments.tsx').then(({ startCommentOnSelection, startCommentOnBlock }) => {
-          if (collapsed) startCommentOnBlock(blockId);
-          else startCommentOnSelection(blockId, sel.start, sel.end, property);
-        });
+        if (collapsed) startCommentOnBlock(blockId);
+        else startCommentOnSelection(blockId, sel.start, sel.end, property);
         return;
       }
       if (!e.shiftKey && lower === 'k') {
@@ -228,12 +225,10 @@ export function makeTextHandlers(blockId: string, property = 'title') {
         if (!collapsed || href) {
           e.preventDefault();
           e.stopPropagation();
-          void import('./inline/LinkPopups.tsx').then(({ openLinkPopup, openLinkEdit, linkExtent }) => {
-            if (collapsed && href) {
-              const ext = linkExtent(value, sel.start, href);
-              if (ext) openLinkEdit({ blockId, property, start: ext.start, end: ext.end }, href);
-            } else openLinkPopup(range);
-          });
+          if (collapsed && href) {
+            const ext = linkExtent(value, sel.start, href);
+            if (ext) openLinkEdit({ blockId, property, start: ext.start, end: ext.end }, href);
+          } else openLinkPopup(range);
         }
         return; // collapsed caret outside a link: the global handler opens Search
       }
@@ -294,10 +289,8 @@ export function makeTextHandlers(blockId: string, property = 'title') {
  // caret on a link: ⌘/ moves into its link menu; otherwise the block menu
         const href = collapsed ? (annotationValue(value, sel.start, sel.start, 'a') as string | undefined) : undefined;
         if (href) {
-          void import('./inline/LinkPopups.tsx').then((m) => {
-            m.syncKeyboardLinkPill(blockId, property, sel.start);
-            requestAnimationFrame(() => { if (!m.focusLinkPill()) openBlockMenuFor(blockId, api.el); });
-          });
+          syncKeyboardLinkPill(blockId, property, sel.start);
+          requestAnimationFrame(() => { if (!focusLinkPill()) openBlockMenuFor(blockId, api.el); });
           return;
         }
         openBlockMenuFor(blockId, api.el);
@@ -315,7 +308,7 @@ export function makeTextHandlers(blockId: string, property = 'title') {
       if (!e.shiftKey && code === 'KeyP') {
  // ⌘⌥P, “Present here” from the block menu
         e.preventDefault();
-        void import('./slashItems.ts').then((m) => m.presentFrom(blockId));
+        presentFrom(blockId);
         return;
       }
       const digit = /^Digit([0-9])$/.exec(code)?.[1] ?? (/^[0-9]$/.test(k) ? k : null);
@@ -338,7 +331,7 @@ export function makeTextHandlers(blockId: string, property = 'title') {
       if (code === 'Backslash' || k === '\\' || k === '«') {
  // ⌘⌥\ clear formatting of the selection
         e.preventDefault();
-        if (!collapsed) void import('./inline/format.ts').then(({ clearFormatRange }) => clearFormatRange(range));
+        if (!collapsed) clearFormatRange(range);
         return;
       }
       if (code === 'KeyT') {
@@ -360,15 +353,13 @@ export function makeTextHandlers(blockId: string, property = 'title') {
     if ((k === 'ArrowLeft' || k === 'ArrowRight') && !e.shiftKey && !e.altKey && !m) {
       setTimeout(() => {
         const after = api.selection();
-        void import('./inline/LinkPopups.tsx').then((mod2) => mod2.syncKeyboardLinkPill(blockId, property, after && after.start === after.end ? after.start : null));
+        syncKeyboardLinkPill(blockId, property, after && after.start === after.end ? after.start : null);
       }, 0);
     }
     if (k === 'Enter' && !e.shiftKey && !m && collapsed && keyboardLinkAt(blockId, property, sel.start)) {
       e.preventDefault();
-      void import('./inline/LinkPopups.tsx').then((mod2) => {
-        const h = mod2.useLinkHover.getState().hover;
-        if (h) mod2.followLink(h.href);
-      });
+      const h = useLinkHover.getState().hover;
+      if (h) followLink(h.href);
       return;
     }
 
@@ -453,7 +444,7 @@ export function makeTextHandlers(blockId: string, property = 'title') {
  // ← onto an inline equation opens its editor
         if (!e.shiftKey && !e.metaKey && !e.altKey && collapsed && sel.start > 0 && isEquationAt(value, sel.start - 1)) {
           e.preventDefault();
-          void import('./inline/EquationEditor.tsx').then((m) => m.openEquationEditor(blockId, property, sel.start - 1, { from: 'right' }));
+          openEquationEditor(blockId, property, sel.start - 1, { from: 'right' });
           return;
         }
  // ⌘← / ⌘→ are line start / end (macOS): never leave the block
@@ -469,7 +460,7 @@ export function makeTextHandlers(blockId: string, property = 'title') {
       case 'ArrowRight': {
         if (!e.shiftKey && !e.metaKey && !e.altKey && collapsed && isEquationAt(value, sel.start)) {
           e.preventDefault();
-          void import('./inline/EquationEditor.tsx').then((m) => m.openEquationEditor(blockId, property, sel.start, { from: 'left' }));
+          openEquationEditor(blockId, property, sel.start, { from: 'left' });
           return;
         }
         if (!e.shiftKey && !e.metaKey && collapsed && sel.end === length(value)) {
@@ -525,10 +516,8 @@ function suggestModeKey(e: ReactKeyboardEvent<HTMLElement>, api: LeafApi, blockI
     if (e.shiftKey && (lower === 's' || lower === 'x')) return block(() => { if (!collapsed) suggestFormatRange(blockId, sel.start, sel.end, ['s']); });
     if (e.shiftKey && lower === 'h') {
       return block(() => {
-        void import('./inline/format.ts').then(({ lastUsedColor }) => {
-          const c = lastUsedColor();
-          if (c && !collapsed) suggestFormatRange(blockId, sel.start, sel.end, ['h', c]);
-        });
+        const c = lastUsedColor();
+        if (c && !collapsed) suggestFormatRange(blockId, sel.start, sel.end, ['h', c]);
       });
     }
     if ((e.shiftKey && (lower === 'e' || k === 'ArrowUp' || k === 'ArrowDown')) || lower === 'k' || lower === 'd' || k === 'Enter') return block();
