@@ -590,7 +590,9 @@ export function resolveParent(input: ParentInput | undefined, userId: string, sp
     return { kind: 'private', spaceId, spaceViewId: sv.id, title: 'Private' };
   }
   if (type === 'teamspace') {
-    const t = getRecord<TeamRecord>('team', String(id ?? ''));
+    // the workspace's own id: its default team
+    const ws = id === spaceId ? getRecord<SpaceRecord>('space', spaceId) : undefined;
+    const t = getRecord<TeamRecord>('team', String((ws ? ws.default_team_ids?.[0] : id) ?? ''));
     if (!t || t.alive === false || t.space_id !== spaceId) throw new AiError('not_found', 'That team does not exist.', 404);
     const inTeam = (t.membership ?? []).some((m) => m.user_id === userId);
     if (!isSpaceMember(getRecord<SpaceRecord>('space', spaceId), userId) || (!inTeam && (t.settings?.type ?? 'open') !== 'open')) {

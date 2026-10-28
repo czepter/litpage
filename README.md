@@ -226,8 +226,10 @@ only talk to local mock servers.
   `/.well-known/`, dynamic client registration, PKCE), so you sign in, pick one or more workspaces and allow access. Other clients
   use a personal access token from Settings → Litpage MCP. One connection can reach several of your workspaces: add or
   remove them later under Settings → Litpage MCP → Workspaces, without connecting the client again (useful where a
-  client allows only one connector per server URL). Each tool call works in the workspace of the page it names, or the
-  one given as `workspace_id`; `lit-get-self` lists them. OAuth uses the address the client connected to; behind a
+  client allows only one connector per server URL). The client is told every workspace the connection reaches; each tool
+  call works in the one given as `workspace_id`, else in the workspace of the page, database or team it names.
+  `lit-search` without one searches all of them, `parent: {"type": "workspace", "id": …}` creates at the top level of a
+  workspace, and results name the workspace they worked in. OAuth uses the address the client connected to; behind a
   reverse proxy set `NC_TRUST_PROXY=1` so it sees the public scheme and host.
   Edits can be partial (replace a phrase inside a block, insert after a passage, replace a range) or cover many database
   rows at once (`lit-update-rows`). Every edit from AI chat, agents or MCP saves the page's previous state as a version
