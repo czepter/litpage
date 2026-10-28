@@ -7,8 +7,8 @@ import { records } from '../../../lib/store/records.ts';
 import { getLocale, t } from '../../shell/i18n.ts';
 import { pageTitle } from '../../page/pageActions.ts';
 
-export type LibTab = 'teamspaces' | 'all' | 'recents' | 'favorites' | 'shared' | 'private' | 'meetings' | 'agents' | 'skills';
-export const LIB_TABS: LibTab[] = ['teamspaces', 'all', 'recents', 'favorites', 'shared', 'private', 'meetings', 'agents', 'skills'];
+export type LibTab = 'teamspaces' | 'all' | 'recents' | 'favorites' | 'shared' | 'private' | 'meetings' | 'agents' | 'skills' | 'trash';
+export const LIB_TABS: LibTab[] = ['teamspaces', 'all', 'recents', 'favorites', 'shared', 'private', 'meetings', 'agents', 'skills', 'trash'];
 export type PageTab = 'all' | 'recents' | 'favorites' | 'shared' | 'private' | 'meetings';
 
 export function isLibTab(v: string | undefined | null): v is LibTab {
@@ -35,6 +35,8 @@ export function tabLabel(tab: LibTab): string {
       return t('lp.home.agents', 'Agents');
     case 'skills':
       return t('lp.home.skills', 'Skills');
+    case 'trash':
+      return t('lp.shell.trash', 'Trash');
   }
 }
 
@@ -48,6 +50,7 @@ export const TAB_ICON: Record<LibTab, string> = {
   meetings: 'libPaperMic',
   agents: 'agentFace',
   skills: 'libPaperSkill',
+  trash: 'trash',
 };
 
 // ---------------- columns ----------------
@@ -142,7 +145,7 @@ export interface LibView {
 }
 
 export function defaultView(tab: LibTab): LibView {
-  const visible = tab === 'teamspaces' || tab === 'skills' || tab === 'agents' ? [] : [...DEFAULT_VISIBLE[tab]];
+  const visible = tab === 'teamspaces' || tab === 'skills' || tab === 'agents' || tab === 'trash' ? [] : [...DEFAULT_VISIBLE[tab]];
   return {
     visible,
     widths: {},

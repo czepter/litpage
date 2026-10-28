@@ -85,6 +85,7 @@ export const handlers: Record<string, Handler> = {
         else rm.add('team', getRecord<TeamRecord>('team', c.id));
       }
       rm.add('lit_user', getRecord('lit_user', b.last_edited_by_id), 'reader');
+      if (b.deleted_by_id && b.deleted_by_id !== b.last_edited_by_id) rm.add('lit_user', getRecord('lit_user', String(b.deleted_by_id)), 'reader');
       pages.push({
         id: b.id,
         path: anc.crumbs,
