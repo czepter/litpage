@@ -1,11 +1,14 @@
 // Write tools of the agent. Each tool plans its change first (permission checks with friendly errors, operations,
 // an approval preview and the pages it touches), asks for approval when the approval mode requires it, then
 // applies the operations as the acting user through changes.ts (applyTransactions with client-level checks,
-// realtime broadcast, Undo log). A declined approval leaves the workspace untouched.
+// realtime broadcast, Undo log). A declined approval leaves the workspace untouched. Edits of existing content save
+// the pages' state as a version first (versions.ts checkpoint), so every AI / MCP change shows in Version history and
+// can be compared and restored (view_version_history / manage_versions) even after the chat's Undo is gone.
 import { newId } from '@nc/shared/ids.ts';
 import { op as mk, type Operation } from '@nc/shared/ops.ts';
 import type { BlockRecord, CollectionRecord, DiscussionRecord, PropertySchema, UserSettingsRecord } from '@nc/shared/records.ts';
-import { slice as sliceText, toPlainText, type Decoration, type RichText } from '@nc/shared/richtext.ts';
+import { annotationsOf, deleteRange, EQUATION_CHAR, insertText, isAtom, MENTION_CHAR, normalize, slice as sliceText, toPlainText, type Annotation, type Decoration, type RichText } from '@nc/shared/richtext.ts';
+import { getPropertyValue } from '@nc/shared/database/values.ts';
 import { suggestEdit } from '@nc/shared/richtextSuggest.ts';
 import { getRecord } from '../../db.ts';
 import { OpsBuilder, shortPropId, type Spec } from '../../content/spec.ts';
@@ -14,12 +17,15 @@ import { AiError } from '../client.ts';
 import { applyAgentOps, type TouchedPage } from '../changes.ts';
 import { blockTitle } from '../context.ts';
 import {
-  addViewOps, canComment, canEditRow, canEditStructure, countBlocks, databaseOf, databaseSpec, deleteOps, editableBlock, encodeValues, inlineRichText, SPECIAL_VIEW_TYPES, specialViewOps, type AgentViewInput,
+  addViewOps, canComment, canEdit, canEditRow, canEditStructure, countBlocks, databaseOf, databaseSpec, deleteOps, editableBlock, encodeValues, inlineRichText, SPECIAL_VIEW_TYPES, specialViewOps, type AgentViewInput,
   formulaPatch, insertSpecs, isAncestor, markdownToSpecs, matchSelection, moveOps, normalizeId, pageUnits, placeUnder, readableBlock, resolveParent, resolvePeople,
   spaceViewOf, textRange, viewsOf, type Parent, type PropertyInput,
 } from '../edit.ts';
-import { notificationsOf } from './read.ts';
-import { discussionVisible, visibleCollection } from '../visibility.ts';
+import { filterRows, notificationsOf, type RowFilter } from './read.ts';
+import { aiQueryContext, discussionVisible, visibleCollection, visibleRows } from '../visibility.ts';
+import { childBlocks } from '../../tree.ts';
+import { getSnapshot } from '../../history.ts';
+import { bookmarkVersion, checkpoint, restoreVersion, VersionError, versionedPageOf } from '../../versions.ts';
 import type { AgentEnv, ApprovalPayload, Risk, StepRef, ToolOutput, ToolRun } from './types.ts';
 import { listMessages } from '../threads.ts';
 import { readStoredFile } from '../../content/files.ts';
@@ -42,6 +48,8 @@ interface Plan {
   detail?: string;
   result: (applied: boolean) => string;
   after?: () => void;
+  /** pages whose current state is saved as a version before the change (and the result after it) */
+  checkpoint?: string[];
 }
 
 /** Approval → apply → step events. Errors from planning are thrown before this (reported by the registry). */
@@ -53,13 +61,24 @@ async function execute(env: AgentEnv, stepId: string, plan: Plan): Promise<ToolO
     env.step({ id: stepId, tool: plan.tool, status: 'declined', label: plan.declined, detail: plan.detail, refs });
     return { content: 'The user rejected this change, so nothing was changed. Do not retry it; ask the user how they would like to proceed.' };
   }
+  let before = new Map<string, string>();
   if (plan.ops.length) {
+    // the state before the change, saved just before it (a millisecond earlier than anything the change records)
+    if (plan.checkpoint?.length) before = checkpoint(plan.checkpoint, Date.now() - 1);
     applyAgentOps({ userId: env.userId, spaceId: env.spaceId, turnId: env.turnId, threadId: env.threadId, clientId: env.clientId, source: env.source }, plan.tool, plan.ops, plan.pages);
+    // and the change itself as the next version, so the two compare exactly
+    if (before.size) checkpoint(before.keys());
     env.touched(plan.pages);
   }
   plan.after?.();
   env.step({ id: stepId, tool: plan.tool, status: 'done', label: plan.done, detail: plan.detail, refs });
-  return { content: plan.result(true) };
+  return { content: plan.result(true) + versionNote(before) };
+}
+
+function versionNote(before: Map<string, string>): string {
+  if (!before.size) return '';
+  const list = [...before].map(([pageId, versionId]) => (before.size === 1 ? `version_id ${versionId}` : `version_id ${versionId} (page ${pageId})`));
+  return `\nThe state before this change is saved as ${list.join(', ')}; restore it with manage_versions to undo.`;
 }
 
 function touch(ptr: { id: string; spaceId: string }, userId: string): Operation {
@@ -213,6 +232,85 @@ async function suggestPageEdit(env: AgentEnv, input: Record<string, any>, stepId
   });
 }
 
+// replace_text: find and replace inside the blocks' text, so a wording change keeps the blocks (ids, comments,
+// formatting of the rest, children). Searches the page's own blocks — every rich-text property, so table cells and
+// captions count — but not nested pages or databases; the page title is update_properties' job.
+const MAX_REPLACEMENTS = 500;
+
+/** Annotations of the character at `offset` (the replacement takes the formatting of the text it replaces). */
+function annotationsOfChar(rt: RichText, offset: number): Annotation[] {
+  let pos = 0;
+  for (const d of rt) {
+    if (offset < pos + d[0].length) return isAtom(d) ? [] : annotationsOf(d);
+    pos += d[0].length;
+  }
+  return [];
+}
+
+function textBlocks(page: BlockRecord): BlockRecord[] {
+  const out: BlockRecord[] = [];
+  const walk = (b: BlockRecord, depth: number) => {
+    if (depth > 50) return;
+    for (const c of childBlocks(b)) {
+      if (c.alive === false || c.type === 'page' || isDatabase(c)) continue;
+      out.push(c);
+      walk(c, depth + 1);
+    }
+  };
+  walk(page, 0);
+  return out;
+}
+
+function replaceTextOps(page: BlockRecord, input: Record<string, any>, userId: string): { ops: Operation[]; description: string } {
+  const oldStr = typeof input.old_str === 'string' ? input.old_str : '';
+  const newStr = (typeof input.new_str === 'string' ? input.new_str : '').replace(/\r\n?/g, '\n');
+  if (!oldStr) throw new AiError('bad_request', 'replace_text needs old_str: the exact text to replace.', 400);
+  if (oldStr.includes(MENTION_CHAR) || oldStr.includes(EQUATION_CHAR)) throw new AiError('bad_request', 'old_str can’t contain mentions or equations. Replace the text around them, or the whole block with replace_content_range.', 400);
+  if (oldStr === newStr) throw new AiError('bad_request', 'Nothing to change: new_str is the same as old_str.', 400);
+  const hits: { block: BlockRecord; key: string; rt: RichText; at: number[] }[] = [];
+  let total = 0;
+  for (const blk of textBlocks(page)) {
+    for (const [key, value] of Object.entries(blk.properties ?? {})) {
+      if (!Array.isArray(value)) continue;
+      const rt = value as RichText;
+      const raw = rt.map((d) => (Array.isArray(d) ? String(d[0] ?? '') : '')).join('');
+      const at: number[] = [];
+      for (let i = raw.indexOf(oldStr); i >= 0; i = raw.indexOf(oldStr, i + oldStr.length)) at.push(i);
+      if (!at.length) continue;
+      hits.push({ block: blk, key, rt, at });
+      total += at.length;
+    }
+  }
+  const quoted = `“${clip(oldStr, 80)}”`;
+  if (!total) throw new AiError('bad_request', `Couldn’t find ${quoted} in the page. Quote the text exactly as read_page shows it (case-sensitive, without Markdown marks like ** or links).`, 400);
+  if (total > 1 && input.replace_all !== true) throw new AiError('bad_request', `${quoted} appears ${total} times in the page. Include more text to make it unique, or set replace_all to replace every occurrence.`, 400);
+  if (total > MAX_REPLACEMENTS) throw new AiError('bad_request', `${quoted} appears ${total} times — more than ${MAX_REPLACEMENTS} replacements in one call. Narrow it down.`, 400);
+  // only the part that differs is rewritten ("on Friday" → "on Monday" changes "Fri"), so the formatting of the text
+  // around it stays exactly where it was
+  let pre = 0;
+  while (pre < oldStr.length && pre < newStr.length && oldStr[pre] === newStr[pre]) pre++;
+  let suf = 0;
+  while (suf < oldStr.length - pre && suf < newStr.length - pre && oldStr[oldStr.length - 1 - suf] === newStr[newStr.length - 1 - suf]) suf++;
+  const insert = newStr.slice(pre, newStr.length - suf);
+  const ops: Operation[] = [];
+  for (const h of hits) {
+    let rt = h.rt;
+    // from the end, so earlier offsets stay valid
+    for (const i of [...h.at].reverse()) {
+      const start = i + pre;
+      const end = i + oldStr.length - suf;
+      // the new text takes the formatting of the text it replaces (of the character before it for a pure insertion)
+      const anns = annotationsOfChar(rt, end > start ? start : Math.max(i, start - 1));
+      rt = deleteRange(rt, start, end);
+      if (insert) rt = insertText(rt, start, insert, anns);
+    }
+    ops.push(mk.set({ table: 'block', id: h.block.id, spaceId: h.block.space_id }, ['properties', h.key], normalize(rt)));
+    ops.push(mk.update({ table: 'block', id: h.block.id, spaceId: h.block.space_id }, [], { last_edited_time: Date.now(), last_edited_by_id: userId, last_edited_by_table: 'lit_user' }));
+  }
+  const times = total === 1 ? '' : ` (${total} times)`;
+  return { ops, description: newStr ? `replaced ${quoted} with “${clip(newStr, 80)}”${times}` : `removed ${quoted}${times}` };
+}
+
 export const updatePage: ToolRun = async (env, input, stepId) => {
   if (input.suggest === true) return suggestPageEdit(env, input, stepId);
   const page = editableBlock(String(input.page_id), env.userId);
@@ -252,6 +350,12 @@ export const updatePage: ToolRun = async (env, input, stepId) => {
     if (!b.ops.length) throw new AiError('bad_request', 'Nothing to update: give title, icon or properties.', 400);
     approval.properties = props;
     summary = `Updated ${props.map((p) => p.name).join(', ')} of “${title}”.`;
+  } else if (command === 'replace_text') {
+    if (isDatabase(page)) throw new AiError('bad_request', `“${title}” is a database: change rows with update_rows or update_page on a row.`, 400);
+    const r = replaceTextOps(page, input, env.userId);
+    b.ops.push(...r.ops);
+    approval.description = r.description;
+    summary = `${r.description[0].toUpperCase()}${r.description.slice(1)} in “${title}”.`;
   } else {
     if (isDatabase(page)) throw new AiError('bad_request', `“${title}” is a database: add rows with create_pages (parent type "database") and change its schema with update_database.`, 400);
     const newStr = typeof input.new_str === 'string' ? input.new_str : '';
@@ -293,6 +397,7 @@ export const updatePage: ToolRun = async (env, input, stepId) => {
   }
   b.ops.push(touch({ id: page.id, spaceId }, env.userId));
   return execute(env, stepId, {
+    checkpoint: [versionedPageOf(page)],
     tool: 'update_page',
     ops: b.ops,
     pages: [{ pageId: page.id, title: typeof input.title === 'string' && command === 'update_properties' ? input.title : title, action: 'updated', database: isDatabase(page) }],
@@ -304,6 +409,193 @@ export const updatePage: ToolRun = async (env, input, stepId) => {
     detail: title,
     result: () => summary,
   });
+};
+
+// ---------------------------------------------------------------------------------------------
+// update_rows
+
+const MAX_ROWS_PER_CALL = 200;
+/** Properties whose value is a list add_values / remove_values can change one item at a time. */
+const LIST_TYPES = new Set(['multi_select', 'person', 'relation']);
+
+/** Current items of a list property of `row` in the form encodeValues takes (option names, user ids, page ids). */
+function listItems(row: BlockRecord, pid: string, col: CollectionRecord, userId: string): string[] {
+  const v = getPropertyValue(row, pid, col.schema, aiQueryContext(userId));
+  if (v.kind === 'select') return v.options.map((o) => o.value);
+  if (v.kind === 'person' || v.kind === 'relation') return [...v.ids];
+  return [];
+}
+
+function asList(raw: unknown): string[] {
+  return (Array.isArray(raw) ? raw : String(raw ?? '').split(',')).map((x) => String(x ?? '').trim()).filter(Boolean);
+}
+
+export const updateRows: ToolRun = async (env, input, stepId) => {
+  const { col, block } = databaseOf(String(input.database_id), env.userId);
+  const name = toPlainText(col.name) || 'Untitled database';
+  const spaceId = block.space_id;
+  const ids = Array.isArray(input.page_ids) ? [...new Set((input.page_ids as string[]).map(normalizeId))] : null;
+  const filters = (Array.isArray(input.filters) ? input.filters : []) as RowFilter[];
+  if (!ids && !filters.length && input.all !== true) throw new AiError('bad_request', 'Say which rows to change: page_ids, filters, or all: true.', 400);
+  const props = (input.properties ?? {}) as Record<string, unknown>;
+  const adds = (input.add_values ?? {}) as Record<string, unknown>;
+  const removes = (input.remove_values ?? {}) as Record<string, unknown>;
+  if (!Object.keys(props).length && !Object.keys(adds).length && !Object.keys(removes).length) throw new AiError('bad_request', 'Nothing to change: give properties, add_values or remove_values.', 400);
+
+  // the rows: only ones this person can see, then the filters
+  let rows = visibleRows(col.id, env.userId);
+  if (ids) {
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    const missing = ids.filter((id) => !byId.has(id));
+    if (missing.length) throw new AiError('not_found', `Not rows of “${name}” (or the user can’t access them): ${missing.slice(0, 5).join(', ')}${missing.length > 5 ? ', …' : ''}.`, 404);
+    rows = ids.map((id) => byId.get(id)!);
+  }
+  const filtered = filterRows(col, rows, filters, env.userId);
+  if (typeof filtered === 'string') throw new AiError('bad_request', filtered, 400);
+  if (!filtered.length) throw new AiError('bad_request', `No rows of “${name}” match. Check the filters with query_database.`, 400);
+  if (filtered.length > MAX_ROWS_PER_CALL) throw new AiError('bad_request', `${filtered.length} rows match — more than ${MAX_ROWS_PER_CALL} in one call. Narrow the filters or split the change.`, 400);
+  const editable = filtered.filter((r) => canEditRow(r.id, env.userId));
+  if (ids && editable.length < filtered.length) {
+    const ro = filtered.filter((r) => !editable.includes(r)).map((r) => `“${blockTitle(r) || 'Untitled'}”`);
+    throw new AiError('forbidden', `The user can only view ${ro.slice(0, 5).join(', ')}${ro.length > 5 ? ', …' : ''}, so they can’t be edited.`, 403);
+  }
+  if (!editable.length) throw new AiError('forbidden', `The user can’t edit the matching rows of “${name}”.`, 403);
+  const skipped = filtered.length - editable.length;
+
+  // the same values for every row; new select options are created once, up front
+  const enc = encodeValues(col, props, env.userId);
+  const errors = [...enc.errors];
+  let schema = { ...col.schema, ...enc.schemaPatch };
+  const pidByName = (nm: string) => Object.keys(schema).find((k) => schema[k].name.trim().toLowerCase() === nm.trim().toLowerCase() || k === nm);
+  const listProps: { name: string; pid: string; add: string[]; remove: string[] }[] = [];
+  for (const nm of new Set([...Object.keys(adds), ...Object.keys(removes)])) {
+    const pid = pidByName(nm);
+    if (!pid) { errors.push(`Unknown property “${nm}”. Properties: ${Object.values(schema).map((p) => p.name).join(', ')}.`); continue; }
+    if (!LIST_TYPES.has(schema[pid].type)) { errors.push(`“${schema[pid].name}” isn’t a multi-select, person or relation property: set it with properties.`); continue; }
+    if (Object.keys(enc.properties).includes(pid)) { errors.push(`“${schema[pid].name}” is both set and changed item by item: use one of properties or add_values / remove_values.`); continue; }
+    const add = asList(adds[nm]);
+    if (schema[pid].type === 'multi_select' && add.length) {
+      const opts = encodeValues({ ...col, schema }, { [nm]: add }, env.userId);
+      errors.push(...opts.errors);
+      schema = { ...schema, ...opts.schemaPatch };
+    }
+    let remove = asList(removes[nm]);
+    if (schema[pid].type === 'person') {
+      const r = resolvePeople(spaceId, remove);
+      if (r.unknown.length) errors.push(`No workspace member matches ${r.unknown.map((x) => `“${x}”`).join(', ')}.`);
+      remove = r.ids;
+    } else if (schema[pid].type === 'relation') remove = remove.map(normalizeId);
+    listProps.push({ name: nm, pid, add, remove });
+  }
+  if (errors.length) throw new AiError('bad_request', [...new Set(errors)].join(' '), 400);
+
+  const working = { ...col, schema } as CollectionRecord;
+  const ops: Operation[] = [];
+  for (const [pid, prop] of Object.entries(schema)) if (prop !== col.schema[pid]) ops.push(mk.set({ table: 'collection', id: col.id, spaceId }, ['schema', pid], prop));
+  const key = (pid: string) => (schema[pid]?.type === 'title' ? 'title' : pid);
+  const now = Date.now();
+  for (const row of editable) {
+    const ptr = { table: 'block' as const, id: row.id, spaceId };
+    for (const [pid, v] of Object.entries(enc.properties)) ops.push(mk.set(ptr, ['properties', key(pid)], v));
+    for (const lp of listProps) {
+      const live = getRecord<BlockRecord>('block', row.id) ?? row;
+      const raw = (live.properties as Record<string, RichText> | undefined)?.[lp.pid];
+      // person values can hold groups, which item lists don't carry: changing them item by item would drop the groups
+      if (schema[lp.pid].type === 'person' && (raw ?? []).some((d) => annotationsOf(d).some((a) => a[0] === 'g'))) {
+        throw new AiError('bad_request', `“${blockTitle(row) || 'Untitled'}” has groups in “${schema[lp.pid].name}”: set the whole value with properties instead.`, 400);
+      }
+      const cur = listItems(row, lp.pid, working, env.userId);
+      const fold = (x: string) => (schema[lp.pid].type === 'multi_select' ? x.toLowerCase() : x);
+      const gone = new Set(lp.remove.map(fold));
+      const next = cur.filter((x) => !gone.has(fold(x)));
+      for (const a of lp.add) if (!next.some((x) => fold(x) === fold(a))) next.push(a);
+      if (next.length === cur.length && next.every((x, i) => x === cur[i])) continue;
+      const one = encodeValues(working, { [lp.name]: next }, env.userId);
+      if (one.errors.length) throw new AiError('bad_request', [...new Set(one.errors)].join(' '), 400);
+      for (const [pid, v] of Object.entries(one.properties)) ops.push(mk.set(ptr, ['properties', key(pid)], v));
+    }
+    ops.push(mk.update(ptr, [], { last_edited_time: now, last_edited_by_id: env.userId, last_edited_by_table: 'lit_user' }));
+  }
+  const changes = [
+    ...Object.entries(props).map(([k, v]) => ({ name: k, value: propertyText(v) })),
+    ...listProps.flatMap((lp) => [
+      ...(lp.add.length ? [{ name: lp.name, value: `+ ${lp.add.join(', ')}` }] : []),
+      ...(lp.remove.length ? [{ name: lp.name, value: `− ${asList(removes[lp.name]).join(', ')}` }] : []),
+    ]),
+  ];
+  const n = editable.length;
+  const rowsLabel = plural(n, '1 row', '{n} rows');
+  const risk: Risk = n > 25 ? 'destructive' : 'edit';
+  return execute(env, stepId, {
+    checkpoint: [versionedPageOf(block)],
+    tool: 'update_rows',
+    ops,
+    pages: [{ pageId: block.id, title: name, action: 'updated', database: true }],
+    risk,
+    approval: {
+      title: `Update ${rowsLabel} in “${name}”`,
+      properties: changes,
+      pages: editable.slice(0, 20).map((r) => ({ pageId: r.id, title: blockTitle(r) || 'Untitled' })),
+      confirmLabel: 'Continue',
+      danger: risk === 'destructive',
+    },
+    running: 'Updating rows',
+    done: `Updated ${rowsLabel}`,
+    declined: `Update ${rowsLabel}`,
+    detail: name,
+    result: () => `Updated ${rowsLabel} of “${name}”: ${changes.map((c) => `${c.name} ${c.value}`).join('; ')}.${skipped ? ` Skipped ${plural(skipped, '1 row', '{n} rows')} the user can only view.` : ''}`,
+  });
+};
+
+// ---------------------------------------------------------------------------------------------
+// manage_versions
+
+export const manageVersions: ToolRun = async (env, input, stepId) => {
+  const page = readableBlock(String(input.page_id), env.userId);
+  const title = blockTitle(page) || 'Untitled';
+  const refs = [{ pageId: page.id, title }];
+  // like Version history: Can edit or more
+  if (!canEdit(page.id, env.userId) && !(page.parent_table === 'collection' && canEditRow(page.id, env.userId))) {
+    throw new AiError('forbidden', `The user can’t manage the versions of “${title}”: it needs edit access to the page.`, 403);
+  }
+  if (input.action === 'save') {
+    const id = checkpoint([page.id]).get(page.id);
+    if (!id) throw new AiError('bad_request', `“${title}” couldn’t be saved as a version.`, 400);
+    const label = typeof input.name === 'string' ? input.name.trim() : '';
+    if (label) bookmarkVersion(id, env.userId, label);
+    env.step({ id: stepId, tool: 'manage_versions', status: 'done', label: 'Saved version of', detail: title, refs });
+    return { content: `Saved the current state of “${title}” as version_id ${id}${label ? ` (“${label}”)` : ''}.` };
+  }
+  if (input.action !== 'restore') throw new AiError('bad_request', 'action must be "save" or "restore".', 400);
+  if (!input.version_id) throw new AiError('bad_request', 'restore needs version_id (from view_version_history).', 400);
+  const snap = getSnapshot(String(input.version_id));
+  if (!snap || snap.pageId !== page.id) throw new AiError('not_found', 'That version doesn’t exist for this page.', 404);
+  const when = new Date(snap.createdTime).toISOString().replace('T', ' ').slice(0, 16);
+  env.step({ id: stepId, tool: 'manage_versions', status: 'running', label: 'Restoring version of', detail: title, refs });
+  const decision = await env.approve({
+    tool: 'manage_versions', stepId, risk: 'destructive',
+    payload: {
+      title: `Restore “${title}” to the version from ${when} UTC?`,
+      description: 'The page’s content, title and icon (and the databases it shows) go back to this version. Today’s state is saved as a version first.',
+      pages: refs, confirmLabel: 'Restore', danger: true,
+    },
+  });
+  if (decision !== 'accept') {
+    env.step({ id: stepId, tool: 'manage_versions', status: 'declined', label: 'Restore version of', detail: title, refs });
+    return { content: 'The user rejected this change, so nothing was changed. Do not retry it; ask the user how they would like to proceed.' };
+  }
+  let r;
+  try {
+    r = restoreVersion(env.userId, snap.id, { restoreDatabases: input.restore_databases !== false, source: env.source });
+  } catch (e) {
+    if (e instanceof VersionError) throw new AiError(e.status === 403 ? 'forbidden' : e.status === 404 ? 'not_found' : 'bad_request', e.message, e.status);
+    throw e;
+  }
+  env.touched([{ pageId: page.id, title, action: 'restored', database: isDatabase(page) }]);
+  env.step({ id: stepId, tool: 'manage_versions', status: 'done', label: 'Restored version of', detail: title, refs });
+  return {
+    content: `Restored “${title}” to version_id ${snap.id} (${when} UTC).${r.databasesUnchanged ? ` ${plural(r.databasesUnchanged, '1 database', '{n} databases')} stayed as they are (no full access, or locked).` : ''}${r.previousVersionId ? ` The state before the restore is saved as version_id ${r.previousVersionId}; restore it to undo.` : ''}`,
+  };
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -497,6 +789,7 @@ export const updateDatabase: ToolRun = async (env, input, stepId) => {
   }
   if (!ops.length) throw new AiError('bad_request', 'Nothing to change.', 400);
   return execute(env, stepId, {
+    checkpoint: [versionedPageOf(block)],
     tool: 'update_database',
     ops,
     pages: [{ pageId: block.id, title: typeof input.title === 'string' && input.title.trim() ? input.title.trim() : name, action: 'updated', database: true }],
@@ -784,6 +1077,8 @@ export const WRITE_TOOL_RUNS: Record<string, ToolRun> = {
   import_csv: importCsv,
   create_pages: createPages,
   update_page: updatePage,
+  update_rows: updateRows,
+  manage_versions: manageVersions,
   delete_pages: deletePages,
   move_pages: movePages,
   create_database: createDatabase,

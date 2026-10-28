@@ -226,6 +226,9 @@ only talk to local mock servers.
   `/.well-known/`, dynamic client registration, PKCE), so you sign in, pick a workspace and allow access. Other clients
   use a personal access token from Settings → Litpage MCP. OAuth uses the address the client connected to; behind a
   reverse proxy set `NC_TRUST_PROXY=1` so it sees the public scheme and host.
+  Edits can be partial (replace a phrase inside a block, insert after a passage, replace a range) or cover many database
+  rows at once (`lit-update-rows`). Every edit from AI chat, agents or MCP saves the page's previous state as a version
+  first; `lit-get-versions` lists and compares versions and `lit-manage-versions` names or restores one.
 
 ## Architecture
 
