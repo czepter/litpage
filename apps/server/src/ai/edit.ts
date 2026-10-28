@@ -10,7 +10,7 @@ import type {
   BlockRecord, CollectionRecord, CollectionViewRecord, PropertySchema, SelectOption, SpaceRecord, SpaceViewRecord, TeamRecord, UserRecord, UserRootRecord,
 } from '@nc/shared/records.ts';
 import type { Annotation, Decoration, RichText } from '@nc/shared/richtext.ts';
-import { annotationsOf, deleteRange, EQUATION_CHAR, insertText, isAtom, MENTION_CHAR, normalize, toPlainText } from '@nc/shared/richtext.ts';
+import { annotationsOf, deleteRange, EQUATION_CHAR, insertRich, insertText, isAtom, MENTION_CHAR, normalize, slice, toPlainText } from '@nc/shared/richtext.ts';
 import { encodeCheckbox, encodeDate, encodeNumber, encodePeople, encodeRelation, encodeSelect } from '@nc/shared/database/values.ts';
 import { canEditDatabaseContent, canEditDatabaseStructure, hasCreatePermission } from '@nc/shared/database/access.ts';
 import { getRecord } from '../db.ts';
@@ -271,6 +271,9 @@ export function textRange(rt: RichText | undefined, selection: string): { start:
 // the blocks' text, so a wording change keeps the blocks (ids, comments, formatting of the rest, children). Searches the
 // page's own blocks — every rich-text property, so table cells and captions count — but not nested pages or databases;
 // the page title is a property edit.
+// Texts may be quoted as plain text or with inline Markdown as read_page / GET …/markdown show it (**bold**, *italic*,
+// ~~strike~~, `code`, [link](url)). Plain on both sides, the new text keeps the formatting of the text it replaces; with
+// Markdown on either side, the new text is formatted exactly as written (colors and comment highlights stay).
 
 export interface TextEdit {
   old_str?: unknown;
@@ -307,6 +310,76 @@ function textBlocks(page: BlockRecord): BlockRecord[] {
 
 const plainOf = (rt: RichText) => rt.map((d) => (Array.isArray(d) ? String(d[0] ?? '') : '')).join('');
 
+/** Annotations Markdown can't write that a Markdown replacement keeps: underline, color, comment highlight. */
+const KEPT_KEYS = new Set(['_', 'h', 'm']);
+
+/**
+ * `rt` as inline Markdown, the way richTextToMarkdown (ai/prompts.ts) writes it, with each Markdown character's offset
+ * in the plain text (-1 for formatting marks). Atoms (mentions, equations…) become "\u0000", which no quoted text
+ * matches: they can't be changed by a text edit.
+ */
+function inlineMarkdown(rt: RichText): { md: string; pos: number[] } {
+  let md = '';
+  const pos: number[] = [];
+  let off = 0;
+  const mark = (m: string) => {
+    md += m;
+    for (let i = 0; i < m.length; i++) pos.push(-1);
+  };
+  for (const d of rt) {
+    if (!Array.isArray(d)) continue;
+    const text = String(d[0] ?? '');
+    if (isAtom(d)) {
+      mark('\u0000'.repeat(text.length));
+      off += text.length;
+      continue;
+    }
+    const a = annotationsOf(d);
+    const has = (k: string) => a.some((x) => x[0] === k);
+    let open = '';
+    let close = '';
+    if (text.trim()) {
+      for (const [k, m] of [['c', '`'], ['b', '**'], ['i', '*'], ['s', '~~']] as const) if (has(k)) { open = m + open; close += m; }
+      const link = a.find((x) => x[0] === 'a');
+      if (link) { open = `[${open}`; close += `](${String(link[1])})`; }
+    }
+    mark(open);
+    for (let i = 0; i < text.length; i++) { md += text[i]; pos.push(off + i); }
+    mark(close);
+    off += text.length;
+  }
+  return { md, pos };
+}
+
+/** Does `s` use inline Markdown (formatting marks, links or escapes)? */
+function usesMarkdown(s: string): boolean {
+  const rt = parseInline(s);
+  return plainOf(rt) !== s || rt.some((d) => annotationsOf(d).length > 0);
+}
+
+/** Plain-text ranges of `field` where `quoted` occurs: as plain text, or as the field's inline Markdown. */
+function findRanges(rt: RichText, quoted: string, markdown: boolean): [number, number][] {
+  const out: [number, number][] = [];
+  if (!markdown) {
+    const raw = plainOf(rt);
+    for (let i = raw.indexOf(quoted); i >= 0; i = raw.indexOf(quoted, i + quoted.length)) out.push([i, i + quoted.length]);
+    return out;
+  }
+  const { md, pos } = inlineMarkdown(rt);
+  for (let i = md.indexOf(quoted); i >= 0; i = md.indexOf(quoted, i + 1)) {
+    const inside = pos.slice(i, i + quoted.length).filter((x) => x >= 0);
+    if (!inside.length) continue;
+    const start = inside[0];
+    const end = inside[inside.length - 1] + 1;
+    // whole formatting spans only: the text found must read exactly like the quote on its own ("**Fri" is no match)
+    if (inlineMarkdown(slice(rt, start, end)).md !== quoted) continue;
+    if (out.length && start < out[out.length - 1][1]) continue;
+    out.push([start, end]);
+    i += quoted.length - 1;
+  }
+  return out;
+}
+
 /**
  * Operations for `edits` applied in order (a later edit sees the text of the earlier ones) — all or nothing: an edit
  * whose text isn't found, or is found more than once without replace_all, throws an AiError naming it.
@@ -329,16 +402,20 @@ export function replaceTextOps(page: BlockRecord, edits: TextEdit[], userId: str
     if (!oldStr) throw new AiError('bad_request', `${which}old_str is required: the exact text to replace.`, 400);
     if (oldStr.includes(MENTION_CHAR) || oldStr.includes(EQUATION_CHAR)) throw new AiError('bad_request', `${which}old_str can’t contain mentions or equations. Replace the text around them, or the whole block with replace_content_range.`, 400);
     if (oldStr === newStr) throw new AiError('bad_request', `${which}new_str is the same as old_str.`, 400);
-    const hits: { id: string; at: number[] }[] = [];
+    const oldMd = usesMarkdown(oldStr);
+    const markdown = oldMd || usesMarkdown(newStr);
+    const hits: { id: string; ranges: [number, number][] }[] = [];
     let total = 0;
     for (const [id, f] of fields) {
-      const raw = plainOf(f.rt);
-      const at: number[] = [];
-      for (let i = raw.indexOf(oldStr); i >= 0; i = raw.indexOf(oldStr, i + oldStr.length)) at.push(i);
-      if (at.length) { hits.push({ id, at }); total += at.length; }
+      const ranges = findRanges(f.rt, oldStr, oldMd);
+      if (ranges.length) { hits.push({ id, ranges }); total += ranges.length; }
     }
     const quoted = `“${oldStr.length > 80 ? `${oldStr.slice(0, 80)}…` : oldStr}”`;
-    if (!total) throw new AiError('bad_request', `${which}Couldn’t find ${quoted} in the page. Quote the text exactly as it reads (case-sensitive, without Markdown marks like ** or links).`, 400);
+    if (!total) {
+      throw new AiError('bad_request', oldMd
+        ? `${which}Couldn’t find ${quoted} in the page. Quote it exactly as the page’s Markdown shows it (case-sensitive, whole **bold** / *italic* / [link](url) spans), or as plain text without the marks.`
+        : `${which}Couldn’t find ${quoted} in the page. Quote the text exactly as it reads (case-sensitive), as plain text or with the Markdown marks the page shows.`, 400);
+    }
     if (total > 1 && e.replace_all !== true) throw new AiError('bad_request', `${which}${quoted} appears ${total} times in the page. Include more text to make it unique, or set replace_all to replace every occurrence.`, 400);
     replaced += total;
     if (replaced > MAX_REPLACEMENTS) throw new AiError('bad_request', `More than ${MAX_REPLACEMENTS} replacements in one call. Narrow it down.`, 400);
@@ -349,13 +426,21 @@ export function replaceTextOps(page: BlockRecord, edits: TextEdit[], userId: str
     let suf = 0;
     while (suf < oldStr.length - pre && suf < newStr.length - pre && oldStr[oldStr.length - 1 - suf] === newStr[newStr.length - 1 - suf]) suf++;
     const insert = newStr.slice(pre, newStr.length - suf);
+    const parsed = markdown ? parseInline(newStr) : [];
     for (const h of hits) {
       const f = fields.get(h.id)!;
       let rt = f.rt;
       // from the end, so earlier offsets stay valid
-      for (const i of [...h.at].reverse()) {
+      for (const [i, j] of [...h.ranges].reverse()) {
+        if (markdown) {
+          // formatted as written, plus what Markdown can't express of the text it replaces
+          const kept = annotationsOfChar(rt, i).filter((a) => KEPT_KEYS.has(a[0]));
+          const ins = parsed.map((d) => (isAtom(d) || !kept.length ? d : ([d[0], [...annotationsOf(d).filter((a) => !KEPT_KEYS.has(a[0])), ...kept]] as Decoration)));
+          rt = insertRich(deleteRange(rt, i, j), i, ins);
+          continue;
+        }
         const start = i + pre;
-        const end = i + oldStr.length - suf;
+        const end = j - suf;
         // the new text takes the formatting of the text it replaces (of the character before it for a pure insertion)
         const anns = annotationsOfChar(rt, end > start ? start : Math.max(i, start - 1));
         rt = deleteRange(rt, start, end);

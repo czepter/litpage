@@ -228,8 +228,8 @@ export const TOOL_DEFS: ToolDef[] = [
         icon: str('New emoji icon (update_properties).'),
         properties: PROPERTIES,
         selection_with_ellipsis: str('Target text: "start...end" or a unique snippet.'),
-        old_str: str('replace_text: the exact text to find (plain text as read_page shows it, without Markdown marks; case-sensitive).'),
-        new_str: str('Markdown to insert or to replace with (replace_text: plain text; empty removes old_str).'),
+        old_str: str('replace_text: the exact text to find, case-sensitive — plain text, or with inline Markdown as read_page shows it (**bold**, *italic*, ~~strike~~, `code`, [link](url)).'),
+        new_str: str('Markdown to insert or to replace with (replace_text: plain text keeps the formatting of the replaced text; with inline Markdown on either side the new text is formatted as written; empty removes old_str).'),
         replace_all: { type: 'boolean', description: 'replace_text: replace every occurrence (otherwise old_str must occur exactly once).' },
         content_updates: {
           type: 'array',

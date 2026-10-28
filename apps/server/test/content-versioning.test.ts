@@ -93,6 +93,44 @@ describe('replace_text', () => {
   });
 });
 
+describe('replace_text with Markdown', () => {
+  let mdPage = '';
+  const runs = () => kids(mdPage)[0].properties.title;
+
+  beforeAll(async () => {
+    const { createPage } = await import('../src/seed.ts');
+    mdPage = createPage({
+      spaceId, userId: A, parentId: spaceId, parentTable: 'space', title: 'Markdown edits',
+      content: [{ type: 'text', title: [['Due '], ['Friday', [['b'], ['h', 'red']]], [', see '], ['spec', [['a', 'https://x.dev/spec']]], ['. Ask Friday.']] }],
+      permissions: [{ type: 'user_permission', role: 'editor', user_id: A }],
+    }).id;
+  });
+
+  it('finds text quoted as the page’s Markdown, and formats the new text as written', async () => {
+    // "Friday" is plain in the last sentence and bold in the first: the Markdown quote picks the bold one only
+    const r = await run(A, 'update_page', { page_id: mdPage, command: 'replace_text', old_str: '**Friday**', new_str: '*Monday*' });
+    expect(r.isError).toBeFalsy();
+    // italic as written, the color (no Markdown for it) stays
+    expect(runs()).toEqual([['Due '], ['Monday', [['i'], ['h', 'red']]], [', see '], ['spec', [['a', 'https://x.dev/spec']]], ['. Ask Friday.']]);
+  });
+
+  it('matches links and spans of several runs, but never half a formatting span', async () => {
+    const link = await run(A, 'update_page', { page_id: mdPage, command: 'replace_text', old_str: 'see [spec](https://x.dev/spec)', new_str: 'see [the spec](https://x.dev/spec-v2)' });
+    expect(link.isError).toBeFalsy();
+    expect(runs()).toContainEqual(['the spec', [['a', 'https://x.dev/spec-v2']]]);
+    const half = await run(A, 'update_page', { page_id: mdPage, command: 'replace_text', old_str: '*Mon', new_str: 'x' });
+    expect(half.isError).toBe(true);
+    expect(half.content).toMatch(/Couldn’t find/);
+  });
+
+  it('adds formatting to plain text, and plain quotes still keep formatting', async () => {
+    expect((await run(A, 'update_page', { page_id: mdPage, command: 'replace_text', old_str: 'Ask Friday', new_str: 'Ask **Friday**' })).isError).toBeFalsy();
+    expect(runs().slice(-3)).toEqual([['. Ask '], ['Friday', [['b']]], ['.']]);
+    expect((await run(A, 'update_page', { page_id: mdPage, command: 'replace_text', old_str: 'Monday', new_str: 'Sunday' })).isError).toBeFalsy();
+    expect(runs()).toContainEqual(['Sunday', [['i'], ['h', 'red']]]);
+  });
+});
+
 describe('versions', () => {
   it('saves the state before every edit; compares and restores it', async () => {
     const r = await run(B, 'update_page', { page_id: pageId, command: 'replace_text', old_str: 'Ships on Monday', new_str: 'Ships next quarter' });

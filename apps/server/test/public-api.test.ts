@@ -437,6 +437,10 @@ describe('comments and markdown', () => {
     expect(miss.status).toBe(400);
     expect(miss.json.message).toMatch(/Edit 2/);
     expect((await api(tokens.full, 'GET', `/pages/${ids.spec}/markdown`)).json.markdown).toContain('**Monday**');
+    // text quoted as the GET …/markdown output shows it, Markdown included
+    const md = await api(tokens.full, 'PATCH', `/pages/${ids.spec}/markdown`, { type: 'update_content', update_content: { content_updates: [{ old_str: 'on **Monday**', new_str: 'on *Tuesday*' }] } });
+    expect(md.status).toBe(200);
+    expect(md.json.markdown).toContain('Ship on *Tuesday* to all teams.');
     const ins = await api(tokens.full, 'PATCH', `/pages/${ids.spec}/markdown`, { type: 'insert_content', insert_content: { content: 'Owner: Ada', after: 'Ship on...all teams.' } });
     expect(ins.status).toBe(200);
     expect(ins.json.markdown).toMatch(/all teams\.\n+Owner: Ada\n+## Risks/);
