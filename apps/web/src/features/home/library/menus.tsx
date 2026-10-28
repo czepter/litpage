@@ -12,7 +12,7 @@ import { useSession } from '../../../lib/store/session.ts';
 import { useUI } from '../../../lib/store/ui.ts';
 import { t } from '../../shell/i18n.ts';
 import {
-  COL_ICON, COL_KIND, availableColumns, colLabel, rangeLabel, useLibraryViews, userName, userOf,
+  COL_ICON, COL_KIND, CONTENT_TYPES, CONTENT_TYPE_ICON, availableColumns, colLabel, contentTypeLabel, rangeLabel, useLibraryViews, userName, userOf,
   type ColKey, type DateRange, type LibFilter, type LibTab, type PageTab,
 } from './model.ts';
 
@@ -97,7 +97,7 @@ export function addFilter(tab: PageTab, col: ColKey) {
 
 export function openFilterMenu(tab: PageTab, anchor: Anchor) {
   const cols: ColKey[] = availableColumns(tab).filter((c) => c !== 'source');
-  const order: ColKey[] = ['title', 'last_visited_time', 'last_edited_time', 'last_edited_by', 'created_time', 'created_by'];
+  const order: ColKey[] = ['title', 'type', 'last_visited_time', 'last_edited_time', 'last_edited_by', 'created_time', 'created_by'];
   const def: MenuDef = {
     width: 290,
     search: t('lp.home.filter_by', 'Filter by…'),
@@ -121,6 +121,7 @@ export function filterSummary(f: LibFilter): string {
     return names.length > 1 ? `${names[0]} +${names.length - 1}` : names[0] ?? '';
   }
   if (kind === 'date' && f.range) return rangeLabel(f.range);
+  if (kind === 'type' && f.types?.length) return f.types.map(contentTypeLabel).join(', ');
   if ((kind === 'title' || kind === 'source') && f.text) return f.text;
   return '';
 }
@@ -190,6 +191,22 @@ function FilterEditor({ tab, filterId, close }: { tab: PageTab; filterId: string
             })}
           </div>
         </>
+      )}
+      {kind === 'type' && (
+        <div className="nc-menu-section">
+          {CONTENT_TYPES.map((c) => {
+            const checked = !!f.types?.includes(c);
+            return (
+              <div key={c} role="menuitemcheckbox" aria-checked={checked} className="nc-menu-item" onClick={() => update((x) => { x.types = checked ? (x.types ?? []).filter((v) => v !== c) : [...(x.types ?? []), c]; })}>
+                <div className="nc-menu-item-inner">
+                  <span className={`nc-lib-check ${checked ? 'on' : ''}`}>{checked && <Icon name="check" size={12} />}</span>
+                  <div className="nc-menu-icon" style={{ color: 'var(--lp-icon-secondary)' }}><Icon name={CONTENT_TYPE_ICON[c]} size={16} /></div>
+                  <div className="nc-menu-label">{contentTypeLabel(c)}</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       )}
       {kind === 'date' && (
         <div className="nc-menu-section">
@@ -280,5 +297,5 @@ function PropertyVisibility({ tab }: { tab: PageTab }) {
 }
 
 export function isTabWithTable(tab: LibTab): tab is PageTab {
-  return tab === 'recents' || tab === 'favorites' || tab === 'shared' || tab === 'private' || tab === 'meetings';
+  return tab === 'all' || tab === 'recents' || tab === 'favorites' || tab === 'shared' || tab === 'private' || tab === 'meetings';
 }

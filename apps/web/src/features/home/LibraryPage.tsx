@@ -1,5 +1,5 @@
 // Library (/<domain>/library/<tab>): full-page library with tabbed views and table controls.
-// h1 "Library" + per-tab primary button, pill tabs (Teamspaces / Recents / Favorites / Shared / Private /
+// h1 "Library" + per-tab primary button, pill tabs (Teamspaces / All content / Recents / Favorites / Shared / Private /
 // AI meeting notes / Skills) with "N more" overflow, Filter, Sort, Search, and Settings tools, table views,
 // filter bar, right "View settings" panel, empty states for AI notes and Skills.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';

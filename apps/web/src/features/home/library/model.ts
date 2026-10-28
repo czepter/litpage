@@ -7,9 +7,9 @@ import { records } from '../../../lib/store/records.ts';
 import { getLocale, t } from '../../shell/i18n.ts';
 import { pageTitle } from '../../page/pageActions.ts';
 
-export type LibTab = 'teamspaces' | 'recents' | 'favorites' | 'shared' | 'private' | 'meetings' | 'agents' | 'skills';
-export const LIB_TABS: LibTab[] = ['teamspaces', 'recents', 'favorites', 'shared', 'private', 'meetings', 'agents', 'skills'];
-export type PageTab = 'recents' | 'favorites' | 'shared' | 'private' | 'meetings';
+export type LibTab = 'teamspaces' | 'all' | 'recents' | 'favorites' | 'shared' | 'private' | 'meetings' | 'agents' | 'skills';
+export const LIB_TABS: LibTab[] = ['teamspaces', 'all', 'recents', 'favorites', 'shared', 'private', 'meetings', 'agents', 'skills'];
+export type PageTab = 'all' | 'recents' | 'favorites' | 'shared' | 'private' | 'meetings';
 
 export function isLibTab(v: string | undefined | null): v is LibTab {
   return !!v && (LIB_TABS as string[]).includes(v);
@@ -19,6 +19,8 @@ export function tabLabel(tab: LibTab): string {
   switch (tab) {
     case 'teamspaces':
       return t('lp.home.teams', 'Teams');
+    case 'all':
+      return t('lp.home.all_content', 'All content');
     case 'recents':
       return t('lp.home.recents', 'Recents');
     case 'favorites':
@@ -38,6 +40,7 @@ export function tabLabel(tab: LibTab): string {
 
 export const TAB_ICON: Record<LibTab, string> = {
   teamspaces: 'teamspace',
+  all: 'stack',
   recents: 'clock',
   favorites: 'star',
   shared: 'people',
@@ -48,12 +51,13 @@ export const TAB_ICON: Record<LibTab, string> = {
 };
 
 // ---------------- columns ----------------
-export type ColKey = 'title' | 'created_by' | 'source' | 'last_edited_time' | 'last_visited_time' | 'last_edited_by' | 'created_time';
-export const ALL_COLUMNS: ColKey[] = ['title', 'created_by', 'source', 'last_edited_time', 'last_visited_time', 'last_edited_by', 'created_time'];
-export type ColKind = 'title' | 'person' | 'source' | 'date';
+export type ColKey = 'title' | 'type' | 'created_by' | 'source' | 'last_edited_time' | 'last_visited_time' | 'last_edited_by' | 'created_time';
+export const ALL_COLUMNS: ColKey[] = ['title', 'type', 'created_by', 'source', 'last_edited_time', 'last_visited_time', 'last_edited_by', 'created_time'];
+export type ColKind = 'title' | 'type' | 'person' | 'source' | 'date';
 
 export const COL_KIND: Record<ColKey, ColKind> = {
   title: 'title',
+  type: 'type',
   created_by: 'person',
   last_edited_by: 'person',
   source: 'source',
@@ -64,6 +68,7 @@ export const COL_KIND: Record<ColKey, ColKind> = {
 
 export const COL_ICON: Record<ColKey, string> = {
   title: 'libDocFill',
+  type: 'libGridFill',
   created_by: 'libUserCircleFill',
   last_edited_by: 'libUserCircleFill',
   source: 'libLocationFill',
@@ -76,6 +81,8 @@ export function colLabel(c: ColKey): string {
   switch (c) {
     case 'title':
       return t('lp.home.page_name', 'Page name');
+    case 'type':
+      return t('lp.home.type', 'Type');
     case 'created_by':
       return t('lp.home.created_by', 'Created by');
     case 'source':
@@ -93,6 +100,7 @@ export function colLabel(c: ColKey): string {
 
 /** Columns visible by default per tab and the properties available to show. */
 export const DEFAULT_VISIBLE: Record<PageTab, ColKey[]> = {
+  all: ['title', 'type', 'source', 'created_by', 'last_edited_time'],
   recents: ['title', 'created_by', 'source', 'last_edited_time', 'last_visited_time'],
   favorites: ['title', 'created_by', 'source', 'last_edited_time'],
   shared: ['title', 'created_by', 'source', 'last_edited_time'],
@@ -101,11 +109,11 @@ export const DEFAULT_VISIBLE: Record<PageTab, ColKey[]> = {
 };
 
 export function availableColumns(tab: PageTab): ColKey[] {
-  return tab === 'recents' ? ALL_COLUMNS : ALL_COLUMNS.filter((c) => c !== 'last_visited_time');
+  return ALL_COLUMNS.filter((c) => (c !== 'last_visited_time' || tab === 'recents') && (c !== 'type' || tab === 'all'));
 }
 
 export const DEFAULT_WIDTH: Record<ColKey, number> = {
-  title: 420, created_by: 200, source: 200, last_edited_time: 200, last_visited_time: 200, last_edited_by: 200, created_time: 200,
+  title: 420, type: 160, created_by: 200, source: 200, last_edited_time: 200, last_visited_time: 200, last_edited_by: 200, created_time: 200,
 };
 
 // ---------------- view state ----------------
@@ -116,6 +124,7 @@ export interface LibFilter {
   text?: string;
   users?: string[];
   range?: DateRange;
+  types?: ContentType[];
 }
 export interface LibSort {
   col: ColKey;
@@ -140,7 +149,8 @@ export function defaultView(tab: LibTab): LibView {
     wrap: {},
     // Private is sorted by "Last edited" by default (blue sort indicator in)
     sort: tab === 'private' ? { col: 'last_edited_time', dir: 'desc' } : null,
-    filters: [],
+    // All content starts without database rows (they can outnumber everything else); the pill can add them back
+    filters: tab === 'all' ? [{ id: 'f-type', col: 'type', types: ['page', 'database'] }] : [],
     group: null,
     includeArchived: false,
     skillsTab: 'enabled',
@@ -157,7 +167,7 @@ function readView(tab: LibTab): LibView {
       ...base,
       ...v,
       visible: Array.isArray(v.visible) && v.visible.length ? v.visible.filter((c): c is ColKey => (ALL_COLUMNS as string[]).includes(c)) : base.visible,
-      filters: Array.isArray(v.filters) ? v.filters : [],
+      filters: Array.isArray(v.filters) ? v.filters : base.filters,
     };
   } catch {
     return base;
@@ -264,6 +274,30 @@ export function sourceOf(b: BlockRecord | undefined, sv: SpaceViewRecord | undef
   return { kind: 'none', label: '' };
 }
 
+// ---------------- content type ----------------
+export type ContentType = 'page' | 'database' | 'row';
+export const CONTENT_TYPES: ContentType[] = ['page', 'database', 'row'];
+
+/** Kind of an entry in "All content": a page, a full-page database, or a row inside a database. */
+export function contentTypeOf(b: BlockRecord | undefined): ContentType {
+  if (b?.type === 'collection_view_page' || b?.type === 'collection_view') return 'database';
+  if (b?.parent_table === 'collection') return 'row';
+  return 'page';
+}
+
+export function contentTypeLabel(c: ContentType): string {
+  switch (c) {
+    case 'page':
+      return t('lp.home.type_page', 'Page');
+    case 'database':
+      return t('lp.home.type_database', 'Database');
+    case 'row':
+      return t('lp.home.type_row', 'Database entry');
+  }
+}
+
+export const CONTENT_TYPE_ICON: Record<ContentType, string> = { page: 'page', database: 'viewTable', row: 'listBullet' };
+
 export function dateValue(b: BlockRecord | undefined, row: Row, col: ColKey): number | undefined {
   if (!b) return undefined;
   if (col === 'last_edited_time') return b.last_edited_time;
@@ -319,6 +353,7 @@ function inRange(ts: number | undefined, r: DateRange): boolean {
 export function matchesFilter(b: BlockRecord | undefined, row: Row, f: LibFilter, sv: SpaceViewRecord | undefined): boolean {
   const kind = COL_KIND[f.col];
   if (kind === 'title') return !f.text || pageTitle(b).toLowerCase().includes(f.text.toLowerCase());
+  if (kind === 'type') return !f.types?.length || f.types.includes(contentTypeOf(b));
   if (kind === 'person') return !f.users?.length || f.users.includes(personValue(b, f.col) ?? '');
   if (kind === 'date') return !f.range || inRange(dateValue(b, row, f.col), f.range);
   if (kind === 'source') return !f.text || sourceOf(b, sv).label.toLowerCase().includes(f.text.toLowerCase());
@@ -326,7 +361,7 @@ export function matchesFilter(b: BlockRecord | undefined, row: Row, f: LibFilter
 }
 
 export function filterActive(f: LibFilter): boolean {
-  return !!(f.text || f.users?.length || f.range);
+  return !!(f.text || f.users?.length || f.range || f.types?.length);
 }
 
 export function sortRows(rows: Row[], sort: LibSort | null, sv: SpaceViewRecord | undefined): Row[] {
@@ -337,6 +372,7 @@ export function sortRows(rows: Row[], sort: LibSort | null, sv: SpaceViewRecord 
     if (kind === 'date') return dateValue(b, r, sort.col) ?? 0;
     if (kind === 'person') return userName(userOf(personValue(b, sort.col))).toLowerCase();
     if (kind === 'source') return sourceOf(b, sv).label.toLowerCase();
+    if (kind === 'type') return CONTENT_TYPES.indexOf(contentTypeOf(b));
     return pageTitle(b).toLowerCase();
   };
   const dir = sort.dir === 'asc' ? 1 : -1;
@@ -359,6 +395,10 @@ export function groupOf(b: BlockRecord | undefined, row: Row, col: ColKey, sv: S
   if (kind === 'source') {
     const s = sourceOf(b, sv);
     return { key: `${s.kind}:${s.id ?? ''}`, label: s.label || t('lp.home.no_value', 'No value') };
+  }
+  if (kind === 'type') {
+    const c = contentTypeOf(b);
+    return { key: c, label: contentTypeLabel(c) };
   }
   if (kind === 'date') {
     const ts = dateValue(b, row, col);
