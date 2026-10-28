@@ -3,7 +3,7 @@
 FROM node:26-slim
 WORKDIR /app
 # corepack no longer ships with Node 26: install the pinned pnpm (package.json "packageManager") directly
-RUN npm install -g pnpm@10.32.1
+RUN npm install -g pnpm@10.34.9
 COPY . .
 RUN pnpm install --frozen-lockfile && pnpm --filter @nc/web build
 ENV NODE_ENV=production HOST=0.0.0.0 NC_TRUST_PROXY=1 NC_DATA_DIR=/data
