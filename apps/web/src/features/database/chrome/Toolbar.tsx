@@ -20,6 +20,7 @@ import { SprintToolbarButton } from '../sprints/SprintSettings.tsx';
 import { openTemplateItemMenu, templateCaption } from '../templates/templates.tsx';
 import { loadAutomations } from '../automations/api.ts';
 import { openToolbarAutofillMenu } from '../../ai/autofillUi.tsx';
+import { openAutomations } from '../automations/list.tsx';
 
 export function ToolButton({ icon, label, onClick, active, pressed, className, rotate }: { icon: string; label: string; onClick?: (e: React.MouseEvent<HTMLDivElement>) => void; active?: boolean; pressed?: boolean; className?: string; rotate?: boolean }) {
   return (
@@ -34,11 +35,6 @@ export function ToolButton({ icon, label, onClick, active, pressed, className, r
       <Icon name={icon} size={16} style={rotate ? { transform: 'rotate(180deg)' } : undefined} />
     </div>
   );
-}
-
-/** ⚡ Automations: the data source's automation list, or the builder when there are none yet (automations/list.tsx). */
-export function openAutomations(collection: CollectionRecord, anchor?: HTMLElement | null) {
-  void import('../automations/list.tsx').then((m) => m.openAutomations(collection, anchor));
 }
 
 export function openTemplatesMenu(anchor: HTMLElement, opts: { collection: CollectionRecord; view: CollectionViewRecord; onCreateFrom: (templateId: string | 'empty') => void }) {

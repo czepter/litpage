@@ -21,6 +21,8 @@ import { useEditor } from './editorState.ts';
 import { titleOf } from './commands.ts';
 import { commitText } from './textHandlers.ts';
 import { formatDateValue } from './inline/dates.ts';
+import { pasteUrlWithMenu } from './inline/PasteMenu.tsx';
+import { linkSelectionWithUrl } from './inline/LinkPopups.tsx';
 
 export const BLOCKS_MIME = 'application/x-nc-blocks';
 
@@ -647,12 +649,12 @@ export function pasteIntoBlock(blockId: string, property: string, api: LeafApi, 
   const url = plainOnly ? '' : plain?.trim();
  // URL pasted over a selection → link it (ed-paste-url-on-selection)
   if (url && URL_RE.test(url) && sel.start !== sel.end && !internal) {
-    void import('./inline/LinkPopups.tsx').then(({ linkSelectionWithUrl }) => linkSelectionWithUrl({ blockId, property, start: sel.start, end: sel.end }, url));
+    linkSelectionWithUrl({ blockId, property, start: sel.start, end: sel.end }, url);
     return;
   }
  // bare URL at the caret → link + "Paste as" menu
   if (url && URL_RE.test(url) && !internal && property === 'title' && !html.includes('<img')) {
-    void import('./inline/PasteMenu.tsx').then(({ pasteUrlWithMenu }) => pasteUrlWithMenu(blockId, property, sel.start, sel.end, url));
+    pasteUrlWithMenu(blockId, property, sel.start, sel.end, url);
     return;
   }
 

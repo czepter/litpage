@@ -24,6 +24,8 @@ import { groupOf } from '../atoms.ts';
 import { Avatar } from './MentionMenus.tsx';
 import { Icon } from '../../../components/Icon.tsx';
 import { useUI } from '../../../lib/store/ui.ts';
+import { refreshLinkMention, replaceRangeWithBlock } from './PasteMenu.tsx';
+import { openBlockLink } from '../blockLinks.ts';
 
 interface PageHover {
   pageId: string;
@@ -108,12 +110,12 @@ export function LinkMentionCard() {
           <Icon name="docOnDoc" size={14} />Copy link
         </div>
         {hover.editable && (
-          <div role="button" className="nc-lm-hover-btn" aria-label="Reload mention" onClick={() => { close(); void import('./PasteMenu.tsx').then((m) => m.refreshLinkMention(range.blockId, range.property, range.start, v.href)); }}>
+          <div role="button" className="nc-lm-hover-btn" aria-label="Reload mention" onClick={() => { close(); refreshLinkMention(range.blockId, range.property, range.start, v.href); }}>
             <Icon name="refresh" size={14} />Reload mention
           </div>
         )}
         {hover.editable && (
-          <div role="button" className="nc-lm-hover-btn" aria-label="Change to preview" onClick={() => { close(); void import('./PasteMenu.tsx').then((m) => m.replaceRangeWithBlock(range, 'bookmark', undefined, v.href)); }}>
+          <div role="button" className="nc-lm-hover-btn" aria-label="Change to preview" onClick={() => { close(); replaceRangeWithBlock(range, 'bookmark', undefined, v.href); }}>
             <Icon name="bookmark" size={14} />Change to preview
           </div>
         )}
@@ -257,7 +259,7 @@ export function installAtomInteractions(): () => void {
       e.preventDefault();
       const blockId = page.dataset.scrollTo; // block mention: open its page scrolled to the block
       if (e.metaKey || e.ctrlKey) window.open(pageUrl(page.dataset.pageId, { blockId }), '_blank');
-      else if (blockId) void import('../blockLinks.ts').then((m) => m.openBlockLink(page.dataset.pageId!, blockId));
+      else if (blockId) openBlockLink(page.dataset.pageId!, blockId);
       else openPage(page.dataset.pageId);
       return;
     }

@@ -18,6 +18,8 @@ import { useUI } from '../../lib/store/ui.ts';
 import { ColorSwatch } from './colorSwatch.tsx';
 import { stickyFormat } from './prefs.ts';
 import { turnIntoItems } from './inline/turnInto.ts';
+import { pushRecentColor } from './inline/format.ts';
+import { startCommentOnBlock } from '../comments/comments.tsx';
 
 /** Stable ids of the slash "Turn into" items (block modules override some by id, e.g. turn-callout). */
 const TURN_IDS: Record<string, string> = {
@@ -139,7 +141,7 @@ const columns = (n: number) => (ctx: SlashContext) => {
 
 const color = (c: string) => (ctx: SlashContext) => {
   run('slash.color', (tx) => setFormat(tx, ctx.blockId, { block_color: c === 'default' ? undefined : c }));
-  void import('./inline/format.ts').then((m) => m.pushRecentColor(c));
+  pushRecentColor(c);
   useEditor.getState().requestFocus(ctx.blockId, 'end');
 };
 
@@ -281,7 +283,7 @@ export function slashCatalog(): SlashItem[] {
     t('move-to', 'Move to', 'Actions', 'arrowTurnUpRight', (ctx) => openMoveToDialog([ctx.blockId], ctx.anchor), { shortcut: '⌘⇧P', keywords: ['moveto', 'move', 'move block'] }),
     t('delete', 'Delete', 'Actions', 'trash', (ctx) => deleteBlocks([ctx.blockId]), { shortcut: 'Del', keywords: ['remove', 'trash'] }),
     // hidden in the unfiltered menu, reachable by search such as “/comment”
-    t('comment', 'Comment', 'Actions', 'commentFilled', (ctx) => void import('../comments/comments.tsx').then((m) => m.startCommentOnBlock(ctx.blockId)), { shortcut: '⌘⇧M', searchOnly: true, keywords: ['comment', 'discussion', 'note'] }),
+    t('comment', 'Comment', 'Actions', 'commentFilled', (ctx) => startCommentOnBlock(ctx.blockId), { shortcut: '⌘⇧M', searchOnly: true, keywords: ['comment', 'discussion', 'note'] }),
     t('present', 'Start presenting here', 'Actions', 'playButton', (ctx) => presentFrom(ctx.blockId), { badge: 'Beta', shortcut: '⌘⌥P', keywords: ['present', 'presentation', 'slides', 'slideshow'] }),
     t('ask-ai', 'Ask AI', 'Actions', 'aiFace', (ctx) => window.dispatchEvent(new CustomEvent('nc:ask-ai', { detail: ctx })), { shortcut: '⌘J', keywords: ['ai', 'litpage ai', 'assistant'] }),
     // "/skill": pick a skill and run it on this block (features/ai handles nc:ai-skill-menu —)

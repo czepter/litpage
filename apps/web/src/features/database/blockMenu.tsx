@@ -12,6 +12,7 @@ import { records } from '../../lib/store/records.ts';
 import { pageUrl } from '../../lib/router.ts';
 import { useEditor } from '../editor/editorState.ts';
 import { duplicateDatabaseBlock, ownsData } from './duplicate.ts';
+import { openMergeCsv } from '../import/MergeCsv.tsx';
 
 function canEdit(b: BlockRecord): boolean {
   return roleAtLeast(records.role('block', b.id), 'read_and_write') && !(b.format as { block_locked?: boolean } | undefined)?.block_locked;
@@ -30,7 +31,7 @@ export function setDatabaseBlockType(blockId: string, type: 'collection_view' | 
 registerBlockMenu(['collection_view'], ({ block }) => (canEdit(block) ? [
   { label: 'Change to entry', icon: 'arrowSquarePathUpDown', onSelect: () => setDatabaseBlockType(block.id, 'collection_view_page') },
   // features/import/MergeCsv.tsx: column mapping, rows added to this database's data source
-  ...(ownsData(block) ? [{ label: 'Combine with CSV', icon: 'fileCsv', description: 'A header row is required', onSelect: () => { void import('../import/MergeCsv.tsx').then((m) => m.openMergeCsv(block.id)); } }] : []),
+  ...(ownsData(block) ? [{ label: 'Combine with CSV', icon: 'fileCsv', description: 'A header row is required', onSelect: () => openMergeCsv(block.id) }] : []),
 ] : []));
 
 registerBlockMenu(['collection_view_page'], ({ block }) => [

@@ -16,6 +16,7 @@ import { run, setFormat } from '../../lib/blocks.ts';
 import { openMenu, type MenuDef, type MenuItemDef } from '../../components/Menu.tsx';
 import { Icon } from '../../components/Icon.tsx';
 import { t } from '../shell/i18n.ts';
+import { retrySummary } from './MeetingNotes.block.tsx';
 
 export interface InstructionsList {
   builtins: { key: string; name: string; icon: string }[];
@@ -68,7 +69,7 @@ function setBlockInstructions(blockId: string, key: string, hasSummary: boolean)
   if (hasSummary) {
     useUI.getState().toast(t('lp.meetings.instructions_updated_they_apply_to_the', 'Instructions updated. They apply to the next summary.'), {
       label: t('lp.meetings.retry_summary', 'Retry summary'),
-      run: () => void import('./MeetingNotes.block.tsx').then((m) => m.retrySummary(blockId)),
+      run: () => retrySummary(blockId),
     });
   }
 }

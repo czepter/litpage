@@ -36,6 +36,7 @@ import { COLOR_LABELS } from '@nc/shared/colors.ts';
 import { ColorSwatch } from '../../properties/editors/SelectEditor.tsx';
 import { SettingsRow, openNestedMenu, setFormat, useViewKit } from '../../advanced/viewKit.tsx';
 import { FormRenderer, type PublicForm } from './FormRenderer.tsx';
+import { openAutomations } from '../../automations/list.tsx';
 import './form.css';
 
 registerIcons({ ncAsterisk: L.Asterisk, ncFormIcon: L.Smile, ncFormCover: L.Image, ncEye: L.Eye, ncLock: L.Lock, ncGlobe: L.Globe, ncSync: L.ArrowLeftRight, ncMove: L.ArrowUpDown, ncBranch: L.Split });
@@ -638,7 +639,7 @@ function FormSettingsMain({ block, view, collection, readOnly, close }: ViewSett
           ] }],
         }, { placement: 'right-start' })} />
         <SettingsRow icon={perm === 'public' ? 'ncGlobe' : 'ncLock'} label="Who can submit" value={permLabel[perm]} disabled={readOnly} onClick={(e) => openShareMenu(e.currentTarget, view.id, collection.id)} />
-        <SettingsRow icon="dbLightning" label="Automations" disabled={readOnly} onClick={(e) => { const a = e.currentTarget; close(); void import('../../automations/list.tsx').then((m) => m.openAutomations(collection, a)); }} />
+        <SettingsRow icon="dbLightning" label="Automations" disabled={readOnly} onClick={(e) => { const a = e.currentTarget; close(); openAutomations(collection, a); }} />
       </div>
       <div className="nc-menu-section with-divider">
         {!readOnly && <SettingsRow icon="trash" label="Delete form" chevron={false} onClick={async () => {
