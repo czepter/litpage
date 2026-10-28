@@ -9,7 +9,7 @@ import { useUserSettings } from '../../lib/hooks.ts';
 import { records } from '../../lib/store/records.ts';
 import { currentSpaceView, useSession } from '../../lib/store/session.ts';
 import { transactions } from '../../lib/store/transactions.ts';
-import { getLocale, setLocale } from '../shell/i18n.ts';
+import { getLocale, normalizeLocale, setLocale } from '../shell/i18n.ts';
 import './contrast.css';
 import { PilcrowRight } from 'lucide-react';
 import { registerIcons } from '../../components/Icon.tsx';
@@ -259,7 +259,7 @@ export function useApplyUserSettings() {
   // language: follow the account setting (once per tab session to avoid reload loops)
   useEffect(() => {
     if (!locale) return;
-    const normalized = locale === 'ko-KR' ? 'ko-KR' : 'en-US';
+    const normalized = normalizeLocale(locale);
     if (normalized === getLocale()) return;
     try {
       if (sessionStorage.getItem(RELOAD_GUARD) === normalized) return;

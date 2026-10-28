@@ -67,17 +67,19 @@ function bucketLabel(b: Bucket) {
   }
 }
 
-/** "41m ago" / "Just now" / "Oct 13" (en) — "41분 전" / "방금" / "10월 13일" (ko). */
+/** "41m ago" / "Just now" / "Oct 13" (en) — "41분 전" / "방금" / "10월 13일" (ko) — "vor 41 Min." / "Gerade eben" (de). */
 export function relativeTime(ts: number): string {
-  const ko = getLocale() === 'ko-KR';
+  const l = getLocale();
+  const ko = l === 'ko-KR';
+  const de = l === 'de-DE';
   const s = Math.floor((Date.now() - ts) / 1000);
-  if (s < 60) return ko ? '지금' : 'Just now';
+  if (s < 60) return ko ? '지금' : de ? 'Gerade eben' : 'Just now';
   const m = Math.floor(s / 60);
-  if (m < 60) return ko ? `${m}분 전` : `${m}m ago`;
+  if (m < 60) return ko ? `${m}분 전` : de ? `vor ${m} Min.` : `${m}m ago`;
   const h = Math.floor(m / 60);
-  if (h < 24) return ko ? `${h}시간 전` : `${h}h ago`;
+  if (h < 24) return ko ? `${h}시간 전` : de ? `vor ${h} Std.` : `${h}h ago`;
   const d = Math.floor(h / 24);
-  if (d < 7) return ko ? `${d}일 전` : `${d}d ago`;
+  if (d < 7) return ko ? `${d}일 전` : de ? `vor ${d} T.` : `${d}d ago`;
   const date = new Date(ts);
   const sameYear = date.getFullYear() === new Date().getFullYear();
   return date.toLocaleDateString(getLocale(), { month: 'short', day: 'numeric', ...(sameYear ? {} : { year: 'numeric' }) });

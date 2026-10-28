@@ -1,6 +1,6 @@
 // Lightweight i18n for the workspace shell (sidebar, search, settings, home, auth, import…).
 
-// Default messages are supplemented by the generated Korean bundle.
+// Default messages are supplemented by the Korean and German bundles.
 // Regenerate it with python3 -I scripts/tools/gen_shell_i18n.py, which scans t('lp.shell.default', 'default') calls.
 
 //
@@ -8,20 +8,31 @@
 //   t('lp.shell.search_or_ask_here', 'Search or ask here')
 //   t('lp.shell.count_plural_one_other', '{count, plural, one {# page} other {# pages}}', { count: 3 })
 import ko from './i18n.ko-KR.json';
+import de from './i18n.de-DE.json';
 
-export type Locale = 'en-US' | 'ko-KR';
+export type Locale = 'en-US' | 'ko-KR' | 'de-DE';
 export const LOCALES: { id: Locale; label: string; native: string }[] = [
   { id: 'en-US', label: 'English (US)', native: 'English (US)' },
   { id: 'ko-KR', label: 'Korean', native: '한국어' },
+  { id: 'de-DE', label: 'German', native: 'Deutsch' },
 ];
 
+/** A supported UI locale for `l`, falling back to en-US. */
+export function normalizeLocale(l: string | undefined | null): Locale {
+  return LOCALES.find((x) => x.id === l)?.id ?? 'en-US';
+}
+
 const STORAGE_KEY = 'nc:locale';
-const catalogs: Record<Locale, Record<string, string>> = { 'en-US': {}, 'ko-KR': ko as Record<string, string> };
+const catalogs: Record<Locale, Record<string, string>> = {
+  'en-US': {},
+  'ko-KR': ko as Record<string, string>,
+  'de-DE': de as Record<string, string>,
+};
 
 function initialLocale(): Locale {
   try {
     const v = localStorage.getItem(STORAGE_KEY);
-    if (v === 'en-US' || v === 'ko-KR') return v;
+    if (v && LOCALES.some((x) => x.id === v)) return v as Locale;
   } catch {
     /* storage unavailable */
   }
@@ -37,7 +48,7 @@ export function getLocale(): Locale {
 
 
 export function setLocale(l: string | undefined | null, opts?: { reload?: boolean }): boolean {
-  const next: Locale = l === 'ko-KR' ? 'ko-KR' : 'en-US';
+  const next = normalizeLocale(l);
   if (next === current) return false;
   current = next;
   try {
@@ -48,6 +59,11 @@ export function setLocale(l: string | undefined | null, opts?: { reload?: boolea
   document.documentElement.lang = next.slice(0, 2);
   if (opts?.reload) location.reload();
   return true;
+}
+
+/** Raw catalog message for the current locale (tags and {vars} untouched), or the default. */
+export function rawMessage(id: string, defaultMessage: string): string {
+  return (current !== 'en-US' && catalogs[current][id]) || defaultMessage;
 }
 
 export type Values = Record<string, string | number | boolean | null | undefined>;
