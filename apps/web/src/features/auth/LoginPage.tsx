@@ -10,8 +10,7 @@ import { useSession } from '../../lib/store/session.ts';
 import { useUI } from '../../lib/store/ui.ts';
 import { Icon } from '../../components/Icon.tsx';
 import { openMenu } from '../../components/Menu.tsx';
-import { getLocale, LOCALES, setLocale, t } from '../shell/i18n.ts';
-import koCatalog from '../shell/i18n.ko-KR.json';
+import { getLocale, LOCALES, rawMessage, setLocale, t } from '../shell/i18n.ts';
 import { AddAccountBar } from '../shell/accounts.tsx';
 import { signInWithPasskey } from '../settings/passkeys.tsx';
 import './icons.tsx';
@@ -110,11 +109,7 @@ export function rich(msg: string, tags: Record<string, (chunk: string) => ReactN
 
 
 export function msg(id: string, defaultMessage: string, values?: Record<string, string | number>): string {
-  let raw = defaultMessage;
-  if (getLocale() === 'ko-KR') {
-    const v = (koCatalog as Record<string, string>)[id];
-    if (v) raw = v;
-  }
+  const raw = rawMessage(id, defaultMessage);
   return values ? raw.replace(/\{(\w+)\}/g, (m, k) => (k in values ? String(values[k]) : m)) : raw;
 }
 

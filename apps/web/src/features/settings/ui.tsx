@@ -7,12 +7,11 @@ import { openMenu, type MenuItemDef } from '../../components/Menu.tsx';
 import { Icon } from '../../components/Icon.tsx';
 import { useUI } from '../../lib/store/ui.ts';
 import { showFeatureLevelHint } from './featureLevel.ts';
-import { getLocale, t } from '../shell/i18n.ts';
-import koBundle from '../shell/i18n.ko-KR.json';
+import { rawMessage, t } from '../shell/i18n.ts';
 
 /** Raw localized message that keeps rich-text tags like <bold> and <inlinelink>; pair with rich(). */
 export function msg(id: string, defaultMessage: string): string {
-  return (getLocale() === 'ko-KR' && (koBundle as Record<string, string>)[id]) || defaultMessage;
+  return rawMessage(id, defaultMessage);
 }
 
 /** Render a message with {vars} (strings or elements) and simple (non-nested) tags: rich(msg(...), {x}, { bold: (c) => <b>{c}</b> }). */
