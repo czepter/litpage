@@ -415,6 +415,32 @@ describe('comments and markdown', () => {
     expect(rep.json.markdown.trim().endsWith('Fresh start')).toBe(true);
     expect(rep.json.markdown).not.toContain('Notes');
   });
+
+  it('updates parts of a page without replacing it: text edits keep the blocks, inserts go after quoted text', async () => {
+    await api(tokens.full, 'PATCH', `/pages/${ids.spec}/markdown`, { type: 'replace_content', replace_content: { content: '## Plan\n\nShip on **Friday** to everyone.\n\n## Risks\n\n- Budget' } });
+    const blocksBefore = (db.getRecord<any>('block', ids.spec).content as string[]).filter((id) => db.getRecord<any>('block', id)?.alive !== false);
+    const u = await api(tokens.full, 'PATCH', `/pages/${ids.spec}/markdown`, {
+      type: 'update_content',
+      update_content: { content_updates: [{ old_str: 'Friday', new_str: 'Monday' }, { old_str: 'everyone', new_str: 'all teams' }] },
+    });
+    expect(u.status).toBe(200);
+    expect(u.json.markdown).toContain('Ship on **Monday** to all teams.');
+    // same blocks, edited in place
+    expect((db.getRecord<any>('block', ids.spec).content as string[]).filter((id) => db.getRecord<any>('block', id)?.alive !== false)).toEqual(blocksBefore);
+    // the state before is a version
+    expect(u.json.previous_version_id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(JSON.stringify(db.db.prepare('SELECT data FROM snapshots WHERE id = ?').get(u.json.previous_version_id))).toContain('Friday');
+    // all or nothing: one missing text leaves the page untouched
+    const miss = await api(tokens.full, 'PATCH', `/pages/${ids.spec}/markdown`, {
+      type: 'update_content', update_content: { content_updates: [{ old_str: 'Monday', new_str: 'Tuesday' }, { old_str: 'not on the page', new_str: 'x' }] },
+    });
+    expect(miss.status).toBe(400);
+    expect(miss.json.message).toMatch(/Edit 2/);
+    expect((await api(tokens.full, 'GET', `/pages/${ids.spec}/markdown`)).json.markdown).toContain('**Monday**');
+    const ins = await api(tokens.full, 'PATCH', `/pages/${ids.spec}/markdown`, { type: 'insert_content', insert_content: { content: 'Owner: Ada', after: 'Ship on...all teams.' } });
+    expect(ins.status).toBe(200);
+    expect(ins.json.markdown).toMatch(/all teams\.\n+Owner: Ada\n+## Risks/);
+  });
 });
 
 describe('personal access tokens and restricted members', () => {

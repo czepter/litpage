@@ -229,6 +229,11 @@ only talk to local mock servers.
   Edits can be partial (replace a phrase inside a block, insert after a passage, replace a range) or cover many database
   rows at once (`lit-update-rows`). Every edit from AI chat, agents or MCP saves the page's previous state as a version
   first; `lit-get-versions` lists and compares versions and `lit-manage-versions` names or restores one.
+- **Partial page edits over REST**: `PATCH /v1/pages/{id}/markdown` changes part of a page instead of all of it.
+  `update_content` replaces text in place (`content_updates: [{ "old_str": "Friday", "new_str": "Monday" }]`, all or
+  nothing; blocks, comments and formatting stay), `insert_content` adds Markdown after a block id or after quoted text
+  (`"after": "## Risks...Budget"`), and `replace_content_range` swaps only the blocks it names. The response carries
+  `previous_version_id`, the version saved right before the edit.
 
 ## Architecture
 

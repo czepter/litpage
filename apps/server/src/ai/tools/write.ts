@@ -7,7 +7,7 @@
 import { newId } from '@nc/shared/ids.ts';
 import { op as mk, type Operation } from '@nc/shared/ops.ts';
 import type { BlockRecord, CollectionRecord, DiscussionRecord, PropertySchema, UserSettingsRecord } from '@nc/shared/records.ts';
-import { annotationsOf, deleteRange, EQUATION_CHAR, insertText, isAtom, MENTION_CHAR, normalize, slice as sliceText, toPlainText, type Annotation, type Decoration, type RichText } from '@nc/shared/richtext.ts';
+import { annotationsOf, slice as sliceText, toPlainText, type Decoration, type RichText } from '@nc/shared/richtext.ts';
 import { getPropertyValue } from '@nc/shared/database/values.ts';
 import { suggestEdit } from '@nc/shared/richtextSuggest.ts';
 import { getRecord } from '../../db.ts';
@@ -18,12 +18,11 @@ import { applyAgentOps, type TouchedPage } from '../changes.ts';
 import { blockTitle } from '../context.ts';
 import {
   addViewOps, canComment, canEdit, canEditRow, canEditStructure, countBlocks, databaseOf, databaseSpec, deleteOps, editableBlock, encodeValues, inlineRichText, SPECIAL_VIEW_TYPES, specialViewOps, type AgentViewInput,
-  formulaPatch, insertSpecs, isAncestor, markdownToSpecs, matchSelection, moveOps, normalizeId, pageUnits, placeUnder, readableBlock, resolveParent, resolvePeople,
+  formulaPatch, insertSpecs, replaceTextOps, type TextEdit, isAncestor, markdownToSpecs, matchSelection, moveOps, normalizeId, pageUnits, placeUnder, readableBlock, resolveParent, resolvePeople,
   spaceViewOf, textRange, viewsOf, type Parent, type PropertyInput,
 } from '../edit.ts';
 import { filterRows, notificationsOf, type RowFilter } from './read.ts';
 import { aiQueryContext, discussionVisible, visibleCollection, visibleRows } from '../visibility.ts';
-import { childBlocks } from '../../tree.ts';
 import { getSnapshot } from '../../history.ts';
 import { bookmarkVersion, checkpoint, restoreVersion, VersionError, versionedPageOf } from '../../versions.ts';
 import type { AgentEnv, ApprovalPayload, Risk, StepRef, ToolOutput, ToolRun } from './types.ts';
@@ -232,85 +231,6 @@ async function suggestPageEdit(env: AgentEnv, input: Record<string, any>, stepId
   });
 }
 
-// replace_text: find and replace inside the blocks' text, so a wording change keeps the blocks (ids, comments,
-// formatting of the rest, children). Searches the page's own blocks — every rich-text property, so table cells and
-// captions count — but not nested pages or databases; the page title is update_properties' job.
-const MAX_REPLACEMENTS = 500;
-
-/** Annotations of the character at `offset` (the replacement takes the formatting of the text it replaces). */
-function annotationsOfChar(rt: RichText, offset: number): Annotation[] {
-  let pos = 0;
-  for (const d of rt) {
-    if (offset < pos + d[0].length) return isAtom(d) ? [] : annotationsOf(d);
-    pos += d[0].length;
-  }
-  return [];
-}
-
-function textBlocks(page: BlockRecord): BlockRecord[] {
-  const out: BlockRecord[] = [];
-  const walk = (b: BlockRecord, depth: number) => {
-    if (depth > 50) return;
-    for (const c of childBlocks(b)) {
-      if (c.alive === false || c.type === 'page' || isDatabase(c)) continue;
-      out.push(c);
-      walk(c, depth + 1);
-    }
-  };
-  walk(page, 0);
-  return out;
-}
-
-function replaceTextOps(page: BlockRecord, input: Record<string, any>, userId: string): { ops: Operation[]; description: string } {
-  const oldStr = typeof input.old_str === 'string' ? input.old_str : '';
-  const newStr = (typeof input.new_str === 'string' ? input.new_str : '').replace(/\r\n?/g, '\n');
-  if (!oldStr) throw new AiError('bad_request', 'replace_text needs old_str: the exact text to replace.', 400);
-  if (oldStr.includes(MENTION_CHAR) || oldStr.includes(EQUATION_CHAR)) throw new AiError('bad_request', 'old_str can’t contain mentions or equations. Replace the text around them, or the whole block with replace_content_range.', 400);
-  if (oldStr === newStr) throw new AiError('bad_request', 'Nothing to change: new_str is the same as old_str.', 400);
-  const hits: { block: BlockRecord; key: string; rt: RichText; at: number[] }[] = [];
-  let total = 0;
-  for (const blk of textBlocks(page)) {
-    for (const [key, value] of Object.entries(blk.properties ?? {})) {
-      if (!Array.isArray(value)) continue;
-      const rt = value as RichText;
-      const raw = rt.map((d) => (Array.isArray(d) ? String(d[0] ?? '') : '')).join('');
-      const at: number[] = [];
-      for (let i = raw.indexOf(oldStr); i >= 0; i = raw.indexOf(oldStr, i + oldStr.length)) at.push(i);
-      if (!at.length) continue;
-      hits.push({ block: blk, key, rt, at });
-      total += at.length;
-    }
-  }
-  const quoted = `“${clip(oldStr, 80)}”`;
-  if (!total) throw new AiError('bad_request', `Couldn’t find ${quoted} in the page. Quote the text exactly as read_page shows it (case-sensitive, without Markdown marks like ** or links).`, 400);
-  if (total > 1 && input.replace_all !== true) throw new AiError('bad_request', `${quoted} appears ${total} times in the page. Include more text to make it unique, or set replace_all to replace every occurrence.`, 400);
-  if (total > MAX_REPLACEMENTS) throw new AiError('bad_request', `${quoted} appears ${total} times — more than ${MAX_REPLACEMENTS} replacements in one call. Narrow it down.`, 400);
-  // only the part that differs is rewritten ("on Friday" → "on Monday" changes "Fri"), so the formatting of the text
-  // around it stays exactly where it was
-  let pre = 0;
-  while (pre < oldStr.length && pre < newStr.length && oldStr[pre] === newStr[pre]) pre++;
-  let suf = 0;
-  while (suf < oldStr.length - pre && suf < newStr.length - pre && oldStr[oldStr.length - 1 - suf] === newStr[newStr.length - 1 - suf]) suf++;
-  const insert = newStr.slice(pre, newStr.length - suf);
-  const ops: Operation[] = [];
-  for (const h of hits) {
-    let rt = h.rt;
-    // from the end, so earlier offsets stay valid
-    for (const i of [...h.at].reverse()) {
-      const start = i + pre;
-      const end = i + oldStr.length - suf;
-      // the new text takes the formatting of the text it replaces (of the character before it for a pure insertion)
-      const anns = annotationsOfChar(rt, end > start ? start : Math.max(i, start - 1));
-      rt = deleteRange(rt, start, end);
-      if (insert) rt = insertText(rt, start, insert, anns);
-    }
-    ops.push(mk.set({ table: 'block', id: h.block.id, spaceId: h.block.space_id }, ['properties', h.key], normalize(rt)));
-    ops.push(mk.update({ table: 'block', id: h.block.id, spaceId: h.block.space_id }, [], { last_edited_time: Date.now(), last_edited_by_id: userId, last_edited_by_table: 'lit_user' }));
-  }
-  const times = total === 1 ? '' : ` (${total} times)`;
-  return { ops, description: newStr ? `replaced ${quoted} with “${clip(newStr, 80)}”${times}` : `removed ${quoted}${times}` };
-}
-
 export const updatePage: ToolRun = async (env, input, stepId) => {
   if (input.suggest === true) return suggestPageEdit(env, input, stepId);
   const page = editableBlock(String(input.page_id), env.userId);
@@ -352,10 +272,13 @@ export const updatePage: ToolRun = async (env, input, stepId) => {
     summary = `Updated ${props.map((p) => p.name).join(', ')} of “${title}”.`;
   } else if (command === 'replace_text') {
     if (isDatabase(page)) throw new AiError('bad_request', `“${title}” is a database: change rows with update_rows or update_page on a row.`, 400);
-    const r = replaceTextOps(page, input, env.userId);
+    const edits: TextEdit[] = Array.isArray(input.content_updates) && input.content_updates.length
+      ? input.content_updates
+      : [{ old_str: input.old_str, new_str: input.new_str, replace_all: input.replace_all === true }];
+    const r = replaceTextOps(page, edits, env.userId);
     b.ops.push(...r.ops);
-    approval.description = r.description;
-    summary = `${r.description[0].toUpperCase()}${r.description.slice(1)} in “${title}”.`;
+    approval.description = r.descriptions.join('; ');
+    summary = `${r.descriptions.map((d) => `${d[0].toUpperCase()}${d.slice(1)}`).join('. ')} in “${title}”.`;
   } else {
     if (isDatabase(page)) throw new AiError('bad_request', `“${title}” is a database: add rows with create_pages (parent type "database") and change its schema with update_database.`, 400);
     const newStr = typeof input.new_str === 'string' ? input.new_str : '';

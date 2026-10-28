@@ -20,7 +20,8 @@ import { db, getRecord } from '../db.ts';
 import { applyTransactions, blockRole } from '../records.ts';
 import { hit } from '../ratelimit.ts';
 import { OpsBuilder, shortPropId, type DbPropSpec, type Spec } from '../content/spec.ts';
-import { deleteOps, markdownToSpecs, matchSelection } from '../ai/edit.ts';
+import { deleteOps, markdownToSpecs, matchSelection, replaceTextOps, type TextEdit } from '../ai/edit.ts';
+import { checkpoint, versionedPageOf } from '../versions.ts';
 import { handlers as commentHandlers } from '../api/modules/comments.ts';
 import { propertyThreadVisible } from '../propaccess.ts';
 import { personalTokenBlocked } from '../ai/litMcp.ts';
@@ -357,8 +358,9 @@ const pagesMarkdownUpdate: Handler = ({ p, params, body, ctx }) => {
   if (page.type !== 'page') throw invalid('Only pages can be edited with Markdown.');
   const type = String(body.type ?? '');
   const data = (body[type] ?? {}) as Json;
-  if (typeof data.content !== 'string' || data.content.length > 500_000) throw invalid(`Invalid request: body.${type || 'type'}.content must be a string.`);
-  const specs = markdownToSpecs(data.content);
+  // update_content edits text in place; the other types write Markdown
+  if (type !== 'update_content' && (typeof data.content !== 'string' || data.content.length > 500_000)) throw invalid(`Invalid request: body.${type || 'type'}.content must be a string.`);
+  const specs = type === 'update_content' ? [] : markdownToSpecs(data.content);
   const b = new OpsBuilder(p.spaceId, p.id);
   const ptrPage = ptr(page);
   const insertAt = (after?: string) => {
@@ -369,10 +371,43 @@ const pagesMarkdownUpdate: Handler = ({ p, params, body, ctx }) => {
       prev = id;
     }
   };
+  const selection = (text: string, field: string) => {
+    try {
+      return matchSelection(pageUnitsAs(page.id, ctx), text);
+    } catch (e) {
+      throw invalid(`Invalid request: ${field}: ${String((e as Error)?.message ?? 'The text was not found.')}`);
+    }
+  };
   if (type === 'insert_content') {
-    const after = data.after ? bodyId(data.after, 'body.insert_content.after') : undefined;
-    if (after && !(page.content ?? []).includes(after)) throw invalid('Invalid request: body.insert_content.after must be a block of this page.');
+    // after: a top-level block id, or text of the page ("start...end" or a unique snippet) to insert after
+    let after: string | undefined;
+    if (data.after !== undefined && data.after !== null && data.after !== '') {
+      if (typeof data.after !== 'string') throw invalid('Invalid request: body.insert_content.after must be a block id or text of the page.');
+      const asId = expandId(data.after.trim()).toLowerCase();
+      if (UUID.test(asId)) {
+        if (!(page.content ?? []).includes(asId)) throw invalid('Invalid request: body.insert_content.after must be a block of this page.');
+        after = asId;
+      } else {
+        const units = pageUnitsAs(page.id, ctx);
+        after = units[selection(data.after, 'body.insert_content.after').last].id;
+      }
+    }
     insertAt(after ?? (page.content ?? []).filter((id) => getRecord<BlockRecord>('block', id)?.alive !== false).slice(-1)[0]);
+  } else if (type === 'update_content') {
+    // text edits inside blocks: the blocks (ids, comments, formatting around the text) stay
+    const updates = data.content_updates;
+    if (!Array.isArray(updates) || !updates.length) throw invalid('Invalid request: body.update_content.content_updates must be a non-empty array of { old_str, new_str }.');
+    const edits: TextEdit[] = updates.map((u: Json, i: number) => {
+      if (!u || typeof u !== 'object' || typeof u.old_str !== 'string' || (u.new_str !== undefined && typeof u.new_str !== 'string')) {
+        throw invalid(`Invalid request: body.update_content.content_updates[${i}] needs old_str (and new_str) strings.`);
+      }
+      return { old_str: u.old_str, new_str: u.new_str ?? '', replace_all: u.replace_all_matches === true || u.replace_all === true };
+    });
+    try {
+      b.ops.push(...replaceTextOps(page, edits, p.id).ops);
+    } catch (e) {
+      throw invalid(String((e as Error)?.message ?? 'The text was not found.'));
+    }
   } else if (type === 'replace_content') {
     const kids = (page.content ?? []).map((id) => getRecord<BlockRecord>('block', id)).filter((x): x is BlockRecord => !!x && x.alive !== false && x.type !== 'page' && x.type !== 'collection_view_page');
     b.ops.push(...deleteOps(kids, p.id));
@@ -380,23 +415,22 @@ const pagesMarkdownUpdate: Handler = ({ p, params, body, ctx }) => {
   } else if (type === 'replace_content_range') {
     if (typeof data.content_range !== 'string' || !data.content_range.trim()) throw invalid('Invalid request: body.replace_content_range.content_range must be "start...end" text of the page.');
     const units = pageUnitsAs(page.id, ctx);
-    let range: { first: number; last: number };
-    try {
-      range = matchSelection(units, data.content_range);
-    } catch (e) {
-      throw invalid(String((e as Error)?.message ?? 'The content range was not found.'));
-    }
+    const range = selection(data.content_range, 'body.replace_content_range.content_range');
     const doomed = units.slice(range.first, range.last + 1).map((u) => getRecord<BlockRecord>('block', u.id)).filter((x): x is BlockRecord => !!x && x.alive !== false);
     const before = range.first > 0 ? units[range.first - 1].id : undefined;
     b.ops.push(...deleteOps(doomed, p.id));
     insertAt(before);
   } else {
-    throw invalid('Invalid request: body.type must be `"insert_content"`, `"replace_content"` or `"replace_content_range"`.');
+    throw invalid('Invalid request: body.type must be `"insert_content"`, `"update_content"`, `"replace_content"` or `"replace_content_range"`.');
   }
   b.ops.push(mk.update(ptrPage, [], touchFields(p)));
+  // like edits from AI and MCP: the state before the change is saved as a version (and the change as the next one)
+  const history = versionedPageOf(page);
+  const before = checkpoint([history], Date.now() - 1).get(history) ?? null;
   applyAs(p, b.ops, 'updatePageMarkdown');
+  checkpoint([history]);
   const md = pageAsMarkdown(getRecord<BlockRecord>('block', page.id)!, readCtx(p));
-  return { object: 'page_markdown', id: page.id, markdown: md.markdown, truncated: md.truncated };
+  return { object: 'page_markdown', id: page.id, markdown: md.markdown, truncated: md.truncated, previous_version_id: before };
 };
 
 // ---------------------------------------------------------------- blocks

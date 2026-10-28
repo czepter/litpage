@@ -219,4 +219,21 @@ describe('MCP', () => {
     const call = await mcp.handleMcpHttp(`Bearer ${token}`, { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'lit-get-versions', arguments: { page_id: pageId } } });
     expect((call.body as any).result.content[0].text).toMatch(/Versions of “Release notes”/);
   });
+
+  it('edits several passages in one call without replacing the page', async () => {
+    const { token } = mcp.createToken(B, spaceId, 'Claude Desktop');
+    const ids = kids(pageId).map((b) => b.id);
+    const call = (args: Record<string, unknown>) => mcp.handleMcpHttp(`Bearer ${token}`, { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'lit-update-page', arguments: args } });
+    const r = await call({ page_id: pageId, command: 'replace_text', content_updates: [{ old_str: 'next quarter', new_str: 'in spring' }, { old_str: 'Owner: release crew', new_str: 'Owner: Ada' }] });
+    expect((r.body as any).result.isError).toBeFalsy();
+    expect(kids(pageId).map((b) => b.id)).toEqual(ids);
+    const text = kids(pageId).map((b) => b.properties.title.map((d: any) => d[0]).join('')).join('\n');
+    expect(text).toContain('Ships in spring to all teams.');
+    expect(text).toContain('Owner: Ada');
+    // all or nothing
+    const bad = await call({ page_id: pageId, command: 'replace_text', content_updates: [{ old_str: 'in spring', new_str: 'in summer' }, { old_str: 'missing text', new_str: 'x' }] });
+    expect((bad.body as any).result.isError).toBe(true);
+    expect((bad.body as any).result.content[0].text).toMatch(/Edit 2/);
+    expect(kids(pageId)[0].properties.title.map((d: any) => d[0]).join('')).toBe('Ships in spring to all teams.');
+  });
 });

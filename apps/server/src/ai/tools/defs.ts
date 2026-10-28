@@ -218,7 +218,7 @@ export const TOOL_DEFS: ToolDef[] = [
   {
     name: 'update_page',
     access: 'write',
-    description: 'Edit a page. Commands: "update_properties" (title, icon, or database row properties); "append_content" (add Markdown at the end); "insert_content_after" (add Markdown after the block matched by selection_with_ellipsis); "replace_text" (replace the exact text old_str with new_str inside the page’s blocks — keeps the blocks, their formatting and comments; replace_all for every occurrence); "replace_content_range" (replace the blocks matched by selection_with_ellipsis with new_str); "replace_content" (replace the whole body with new_str). selection_with_ellipsis is the start and end of the target text as it appears in read_page output, joined by "..." — e.g. "## Risks...owner: Ada" — or a short unique snippet. Prefer replace_text for small wording changes. Every edit first saves the page’s current state as a version (the result names it), so it can be restored with manage_versions. Read the page first.',
+    description: 'Edit a page. Commands: "update_properties" (title, icon, or database row properties); "append_content" (add Markdown at the end); "insert_content_after" (add Markdown after the block matched by selection_with_ellipsis); "replace_text" (replace the exact text old_str with new_str inside the page’s blocks — keeps the blocks, their formatting and comments; replace_all for every occurrence; several changes at once with content_updates, applied together or not at all); "replace_content_range" (replace the blocks matched by selection_with_ellipsis with new_str); "replace_content" (replace the whole body with new_str). selection_with_ellipsis is the start and end of the target text as it appears in read_page output, joined by "..." — e.g. "## Risks...owner: Ada" — or a short unique snippet. Prefer replace_text for small wording changes. Every edit first saves the page’s current state as a version (the result names it), so it can be restored with manage_versions. Read the page first.',
     input_schema: {
       type: 'object',
       properties: {
@@ -231,6 +231,18 @@ export const TOOL_DEFS: ToolDef[] = [
         old_str: str('replace_text: the exact text to find (plain text as read_page shows it, without Markdown marks; case-sensitive).'),
         new_str: str('Markdown to insert or to replace with (replace_text: plain text; empty removes old_str).'),
         replace_all: { type: 'boolean', description: 'replace_text: replace every occurrence (otherwise old_str must occur exactly once).' },
+        content_updates: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 100,
+          description: 'replace_text: several replacements in one call, in order (instead of old_str / new_str).',
+          items: {
+            type: 'object',
+            properties: { old_str: str('Exact text to find.'), new_str: str('Text to put in its place (empty removes it).'), replace_all: { type: 'boolean' } },
+            required: ['old_str'],
+            additionalProperties: false,
+          },
+        },
         suggest: { type: 'boolean', description: 'Write the change as a suggested edit the user accepts or rejects on the page instead of editing directly — when the user asks you to "suggest edits", or can only comment. Works with replace_content_range inside one text / heading / list / to-do block (one call per block; an empty new_str suggests removing the text).' },
       },
       required: ['page_id', 'command'],
