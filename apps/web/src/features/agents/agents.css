@@ -369,7 +369,9 @@
 
 .nc-agents-admin-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .nc-agents-admin-name { display: inline-flex; align-items: center; gap: 6px; max-width: 220px; }
-.nc-agents-admin-res { display: flex; flex-direction: column; gap: 10px; padding: 20px; width: 460px; max-width: calc(100vw - 32px); }
+/* rendered inside .nc-set-subdialog, which supplies the padding and the max-width */
+.nc-set-subdialog:has(> .nc-agents-admin-res) { width: 460px; }
+.nc-agents-admin-res { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .nc-agents-admin-res .ttl { font-size: 16px; font-weight: 600; color: var(--lp-text-primary); }
 .nc-agents-admin-res-foot { display: flex; justify-content: flex-end; }
 .nc-agents-left { margin-top: 24px; }
