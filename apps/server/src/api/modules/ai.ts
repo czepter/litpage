@@ -638,11 +638,11 @@ export const handlers = {
     return guarded(() => ({ workspaces: tokenWorkspaces(userId, String(body?.tokenId ?? '')) }));
   },
 
-  /** Add or remove workspaces of a connection (its home stays). */
+  /** Add or remove workspaces of a connection; homeSpaceId makes one of them the main workspace. */
   mcpSetTokenWorkspaces(ctx: Ctx, body: any) {
     const userId = uid(ctx);
     const ids = Array.isArray(body?.spaceIds) ? body.spaceIds.filter((s: unknown): s is string => typeof s === 'string') : [];
-    return guarded(() => ({ token: setTokenWorkspaces(userId, String(body?.tokenId ?? ''), ids) }));
+    return guarded(() => ({ token: setTokenWorkspaces(userId, String(body?.tokenId ?? ''), ids, typeof body?.homeSpaceId === 'string' ? body.homeSpaceId : undefined) }));
   },
 
   /** Settings › MCP › Enabled clients › Disable / Remove: the caller's tokens connected with that client stop. */

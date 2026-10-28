@@ -23,7 +23,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { expandId, newId } from '@nc/shared/ids.ts';
 import { isSpaceMember } from '@nc/shared/permissions.ts';
 import { isSpaceOwner } from '../policy.ts';
-import type { BlockRecord, SpaceRecord, SpaceViewRecord, UserRecord, UserRootRecord, UserSettingsRecord } from '@nc/shared/records.ts';
+import type { BlockRecord, SpaceRecord, SpaceViewRecord, TeamRecord, UserRecord, UserRootRecord, UserSettingsRecord } from '@nc/shared/records.ts';
 import { db, getRecord } from '../db.ts';
 import { audit } from '../audit.ts';
 import { realtime } from '../realtime.ts';
@@ -227,8 +227,8 @@ export interface McpTokenWorkspace {
   problem: string | null;
 }
 
-function ownToken(userId: string, tokenId: string): TokenRow & { client_key: string | null } {
-  const r = db.prepare('SELECT * FROM mcp_tokens WHERE id = ? AND revoked_time IS NULL').get(String(tokenId)) as (TokenRow & { client_key: string | null }) | undefined;
+function ownToken(userId: string, tokenId: string): TokenRow & { client_key: string | null; client_name: string | null } {
+  const r = db.prepare('SELECT * FROM mcp_tokens WHERE id = ? AND revoked_time IS NULL').get(String(tokenId)) as (TokenRow & { client_key: string | null; client_name: string | null }) | undefined;
   if (!r || r.user_id !== userId) throw new AiError('not_found', 'That connection doesn’t exist.', 404);
   return r;
 }
@@ -249,18 +249,30 @@ export function tokenWorkspaces(userId: string, tokenId: string): McpTokenWorksp
   return out;
 }
 
-/** Choose the workspaces a connection reaches besides its home (its person only). */
-export function setTokenWorkspaces(userId: string, tokenId: string, spaceIds: string[]): McpTokenInfo {
+/**
+ * Choose the workspaces a connection reaches (its person only). `homeSpaceId` makes another of them the main
+ * workspace — where calls go that name no page or workspace; the old main one stays reached if it is in `spaceIds`.
+ */
+export function setTokenWorkspaces(userId: string, tokenId: string, spaceIds: string[], homeSpaceId?: string): McpTokenInfo {
   const r = ownToken(userId, tokenId);
-  const want = [...new Set(spaceIds.map(String))].filter((id) => id !== r.space_id).slice(0, 50);
-  const have = (db.prepare('SELECT space_id FROM mcp_token_spaces WHERE token_id = ?').all(r.id) as { space_id: string }[]).map((x) => x.space_id);
-  const add = want.filter((id) => !have.includes(id));
-  for (const id of add) {
+  const home = homeSpaceId ? String(homeSpaceId) : r.space_id;
+  const reached = new Set([r.space_id, ...(db.prepare('SELECT space_id FROM mcp_token_spaces WHERE token_id = ?').all(r.id) as { space_id: string }[]).map((x) => x.space_id)]);
+  const want = [...new Set([home, ...spaceIds.map(String)])].slice(0, 50);
+  for (const id of want) {
+    if (reached.has(id) && id !== home) continue;
     const problem = spaceProblem(id, userId, r.client_key ?? 'unknown');
     if (problem) throw new AiError('forbidden', `${getRecord<SpaceRecord>('space', id)?.name || 'Workspace'}: ${problem}`, 403);
   }
-  for (const id of have) if (!want.includes(id)) db.prepare('DELETE FROM mcp_token_spaces WHERE token_id = ? AND space_id = ?').run(r.id, id);
-  linkSpaces(r.id, add);
+  if (home !== r.space_id) {
+    if (activeTokenCount(userId, home) >= MAX_TOKENS) throw new AiError('bad_request', `You can have up to ${MAX_TOKENS} active MCP connections in a workspace. Revoke one there first.`, 400);
+    db.prepare('UPDATE mcp_tokens SET space_id = ? WHERE id = ?').run(home, r.id);
+  }
+  db.prepare('DELETE FROM mcp_token_spaces WHERE token_id = ?').run(r.id);
+  const now = Date.now();
+  for (const id of want) if (id !== home) db.prepare('INSERT INTO mcp_token_spaces (token_id, space_id, added_time) VALUES (?, ?, ?)').run(r.id, id, now);
+  for (const id of want) {
+    if (!reached.has(id)) audit('workspace_mcp_server_connected', { spaceId: id, actorId: userId, targetId: r.id, data: { client: r.client_name ?? null } });
+  }
   return info(db.prepare('SELECT * FROM mcp_tokens WHERE id = ?').get(r.id) as unknown as TokenRow);
 }
 
@@ -568,13 +580,25 @@ const usableSpaces = (auth: McpAuth) => auth.spaces.filter((id) => !callProblem(
 
 const ID_RE = /[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}/gi;
 
-/** The workspace of the first page or database the arguments name (ids or Litpage URLs) that this connection reaches. */
+/** String values of the arguments, nested ones too (parent: {type, id}, pages: [{…}]), in order. */
+function argStrings(v: unknown, out: string[] = [], depth = 0): string[] {
+  if (out.length >= 100 || depth > 4) return out;
+  if (typeof v === 'string') out.push(v);
+  else if (Array.isArray(v)) for (const x of v) argStrings(x, out, depth + 1);
+  else if (v && typeof v === 'object') for (const x of Object.values(v)) argStrings(x, out, depth + 1);
+  return out;
+}
+
+/**
+ * The workspace of the first page, database, team or workspace the arguments name (ids or Litpage URLs, anywhere in
+ * the arguments) that this connection reaches.
+ */
 function spaceOfArgs(auth: McpAuth, args: Record<string, unknown>): string | null {
-  const values = Object.values(args).flatMap((v) => (Array.isArray(v) ? v : [v])).filter((v): v is string => typeof v === 'string').slice(0, 50);
-  for (const v of values) {
+  for (const v of argStrings(args)) {
     for (const m of v.match(ID_RE) ?? []) {
       const id = expandId(m);
-      const space = getRecord<BlockRecord>('block', id)?.space_id ?? getRecord<any>('collection', id)?.space_id;
+      if (auth.spaces.includes(id)) return id;
+      const space = getRecord<BlockRecord>('block', id)?.space_id ?? getRecord<any>('collection', id)?.space_id ?? getRecord<TeamRecord>('team', id)?.space_id;
       if (space && auth.spaces.includes(space)) return space;
     }
   }

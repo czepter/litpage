@@ -241,16 +241,17 @@ interface TokenWorkspace { id: string; name: string; icon: string | null; home: 
 function TokenWorkspaces({ token, close }: { token: TokenInfo; close: () => void }) {
   const [list, setList] = useState<TokenWorkspace[] | null>(null);
   const [on, setOn] = useState<string[]>([]);
+  const [home, setHome] = useState(token.homeSpaceId);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     api<{ workspaces: TokenWorkspace[] }>('mcpTokenWorkspaces', { tokenId: token.id })
-      .then((r) => { setList(r.workspaces); setOn(r.workspaces.filter((w) => w.on && !w.home).map((w) => w.id)); })
+      .then((r) => { setList(r.workspaces); setOn(r.workspaces.filter((w) => w.on).map((w) => w.id)); })
       .catch((e) => { useUI.getState().toast((e as Error)?.message || 'Couldn’t load your workspaces'); close(); });
   }, [token.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const save = async () => {
     setBusy(true);
     try {
-      await api('mcpSetTokenWorkspaces', { tokenId: token.id, spaceIds: on });
+      await api('mcpSetTokenWorkspaces', { tokenId: token.id, spaceIds: on, homeSpaceId: home });
       useUI.getState().toast('Workspaces saved');
       close();
     } catch (e) {
@@ -261,18 +262,23 @@ function TokenWorkspaces({ token, close }: { token: TokenInfo; close: () => void
   return (
     <div className="nc-ai-mcp-members" data-testid="mcp-token-workspaces">
       <div className="ttl">Workspaces for “{token.name}”</div>
-      <div className="desc">The connection can work in every workspace you tick. Your MCP client keeps its connection; tools pick the workspace by the page they work on, or by name.</div>
+      <div className="desc">The connection can work in every workspace you tick. Your MCP client keeps its connection; tools pick the workspace by the page they work on, or by name. New pages without a parent go to the main workspace.</div>
       {list === null ? <div className="nc-set-row-desc">Loading…</div> : (
         <div className="nc-ai-mcp-pick">
           {list.map((w) => {
-            const checked = w.home || on.includes(w.id);
-            const locked = w.home || (!!w.problem && !checked);
+            const isHome = w.id === home;
+            const checked = isHome || on.includes(w.id);
+            const usable = !w.problem || w.on;
             return (
-              <label key={w.id} className={`nc-agent-picker-row ${checked ? 'on' : ''}`} data-space-id={w.id} title={w.problem ?? undefined}>
-                <input type="checkbox" checked={checked} disabled={locked} onChange={(e) => setOn(e.target.checked ? [...on, w.id] : on.filter((x) => x !== w.id))} />
+              <div key={w.id} className={`nc-agent-picker-row ${checked ? 'on' : ''}`} data-space-id={w.id} title={w.problem ?? undefined}>
+                <input type="checkbox" aria-label={`Use ${w.name}`} checked={checked} disabled={isHome || !usable} onChange={(e) => setOn(e.target.checked ? [...on, w.id] : on.filter((x) => x !== w.id))} />
                 <span className="nc-ellipsis">{w.icon ? `${w.icon} ` : ''}{w.name}</span>
-                <span className="nc-agent-picker-hint nc-ellipsis">{w.home ? 'Main workspace' : w.problem && !checked ? w.problem : ''}</span>
-              </label>
+                <span className="nc-agent-picker-hint nc-ellipsis">{w.problem && !w.on ? w.problem : ''}</span>
+                <label className="nc-ai-set-token-home">
+                  <input type="radio" name={`mcp-home-${token.id}`} checked={isHome} disabled={!!w.problem} onChange={() => { setHome(w.id); if (!on.includes(w.id)) setOn([...on, w.id]); }} />
+                  Main
+                </label>
+              </div>
             );
           })}
         </div>

@@ -1,6 +1,7 @@
 // One Litpage MCP connection for several workspaces (ai/litMcp.ts, ai/mcpOAuth.ts): workspaces added later in Settings →
 // Litpage MCP, the workspace of each call (workspace_id, the page it names, else the home), each workspace's own
-// "Allow Litpage MCP", owners of an added workspace removing only theirs, and several workspaces ticked at OAuth consent.
+// "Allow Litpage MCP", owners of an added workspace removing only theirs, new pages under a team of an added workspace,
+// switching the main workspace, and several workspaces ticked at OAuth consent.
 import { createHash, randomBytes } from 'node:crypto';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -106,6 +107,40 @@ describe('a connection reaching more workspaces', () => {
     await call(ids.member, 'mcpSetTokenWorkspaces', { tokenId: info.id, spaceIds: [ids.second] });
     await call(ids.owner, 'mcpRevokeAll', { spaceId: ids.second });
     expect((await call(ids.member, 'mcpListTokens', { spaceId: ids.main })).tokens.find((t: any) => t.id === info.id).workspaces.map((w: any) => w.name)).toEqual(['Main']);
+  });
+});
+
+describe('creating pages in an added workspace', () => {
+  const created = (text: string) => [...text.matchAll(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g)].map((m) => db.getRecord<any>('block', m[0])).find((b) => b?.type === 'page' && b.properties?.title?.[0]?.[0]?.startsWith('Wedding'));
+
+  it('a parent nested in the arguments (a team, or the workspace itself) picks the workspace', async () => {
+    const { token, info } = await call(ids.member, 'mcpCreateToken', { spaceId: ids.main, name: 'Claude pages' });
+    await call(ids.member, 'mcpSetTokenWorkspaces', { tokenId: info.id, spaceIds: [ids.second] });
+    const team = db.getRecord<any>('space', ids.second).default_team_ids[0];
+
+    const inTeam = await toolCall(token, 'lit-create-pages', { parent: { type: 'teamspace', id: team }, pages: [{ title: 'Wedding guide' }] });
+    expect(inTeam.isError).toBeFalsy();
+    expect(created(inTeam.content[0].text)?.space_id).toBe(ids.second);
+
+    // the workspace id given as the teamspace: its default team
+    const inSpace = await toolCall(token, 'lit-create-pages', { parent: { type: 'teamspace', id: ids.second }, pages: [{ title: 'Wedding extras' }] });
+    expect(inSpace.isError).toBeFalsy();
+    expect(created(inSpace.content[0].text)?.space_id).toBe(ids.second);
+  });
+
+  it('the main workspace can be switched in Settings; pages without a parent go there', async () => {
+    const { token, info } = await call(ids.member, 'mcpCreateToken', { spaceId: ids.main, name: 'Claude main' });
+    const saved = (await call(ids.member, 'mcpSetTokenWorkspaces', { tokenId: info.id, spaceIds: [ids.main, ids.second], homeSpaceId: ids.second })).token;
+    expect(saved.homeSpaceId).toBe(ids.second);
+    expect(saved.workspaces.map((w: any) => w.name)).toEqual(['Second', 'Main']);
+    expect(JSON.parse((await toolCall(token, 'lit-get-self')).content[0].text).workspace.id).toBe(ids.second);
+    const page = await toolCall(token, 'lit-create-pages', { pages: [{ title: 'Wedding main' }] });
+    expect(page.isError).toBeFalsy();
+    expect(created(page.content[0].text)?.space_id).toBe(ids.second);
+    // the old main workspace is still reached
+    expect((await toolCall(token, 'lit-fetch', { id: ids.mainPage })).content[0].text).toContain('amber-otter');
+    // a workspace the person isn't in can't become the main one
+    await expect(call(ids.member, 'mcpSetTokenWorkspaces', { tokenId: info.id, spaceIds: [], homeSpaceId: ids.foreign })).rejects.toThrow();
   });
 });
 
