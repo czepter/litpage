@@ -658,11 +658,13 @@
 .nc-ai-mcp-client-name { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .nc-ai-mcp-client-logo { width: 22px; height: 22px; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 12px; font-weight: 600; color: var(--lp-text-secondary); background: var(--lp-bg-tertiary-transparent); }
 .nc-ai-mcp-menu-foot { padding: 6px 12px 8px; font-size: 12px; color: var(--lp-text-tertiary); border-top: 1px solid var(--lp-border-secondary-transparent); }
-.nc-ai-mcp-rename, .nc-ai-mcp-members { display: flex; flex-direction: column; gap: 10px; padding: 20px; width: 560px; max-width: calc(100vw - 32px); }
-.nc-ai-mcp-rename { width: 380px; }
+/* rendered inside .nc-set-subdialog, which supplies the padding; the members dialogs widen it for their tables */
+.nc-set-subdialog:has(> .nc-ai-mcp-members) { width: 560px; }
+.nc-ai-mcp-rename, .nc-ai-mcp-members { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .nc-ai-mcp-rename .ttl, .nc-ai-mcp-members .ttl { font-size: 16px; font-weight: 600; color: var(--lp-text-primary); }
-.nc-ai-mcp-rename .desc, .nc-ai-mcp-members .desc { font-size: 13px; color: var(--lp-text-secondary); }
-.nc-ai-mcp-rename .actions, .nc-ai-mcp-members .actions { display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
+.nc-set-subdialog .nc-ai-mcp-rename .desc, .nc-set-subdialog .nc-ai-mcp-members .desc { font-size: 13px; color: var(--lp-text-secondary); text-align: start; }
+.nc-set-subdialog .nc-ai-mcp-rename .actions, .nc-set-subdialog .nc-ai-mcp-members .actions { flex-direction: row; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 0; }
+.nc-set-subdialog .nc-ai-mcp-rename .actions .nc-set-btn, .nc-set-subdialog .nc-ai-mcp-members .actions .nc-set-btn { width: auto; }
 .nc-ai-mcp-members .actions > .nc-set-row-desc { margin-inline-end: auto; }
 .nc-ai-mcp-pick { max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
 .nc-ai-mcp-preset-form { display: flex; flex-direction: column; gap: 10px; padding: 4px 0 8px; max-width: 520px; }
