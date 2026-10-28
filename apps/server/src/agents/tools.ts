@@ -423,7 +423,7 @@ export async function runAgentTool(ctx: RunToolContext, env: AgentEnv, name: str
 
 /** Tools an agent run offers, including agent-only tools enabled by its configuration. */
 export function agentToolNames(cfg: AgentConfig, opts: { canConfigure: boolean; web: boolean }): string[] {
-  const names = ['search_workspace', 'read_page', 'query_database', 'read_comments', 'view_version_history', 'create_pages', 'update_page', 'update_rows', 'manage_versions', 'delete_pages', 'list_trash', 'restore_pages', 'move_pages', 'create_database', 'update_database', 'add_comment', 'send_notification', 'read_agent_history'];
+  const names = ['search_workspace', 'read_page', 'query_database', 'read_comments', 'view_version_history', 'create_pages', 'update_page', 'update_rows', 'manage_versions', 'delete_pages', 'list_trash', 'restore_pages', 'move_pages', 'create_database', 'update_database', 'create_linked_views', 'add_comment', 'send_notification', 'read_agent_history'];
   if (cfg.people_directory) names.push('list_people');
   if (cfg.sub_agents.length) names.push('call_agent');
   if (opts.web) names.push('request_url_access');

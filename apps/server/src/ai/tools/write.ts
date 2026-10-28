@@ -30,6 +30,10 @@ import type { AgentEnv, ApprovalPayload, Risk, StepRef, ToolOutput, ToolRun } fr
 import { listMessages } from '../threads.ts';
 import { readStoredFile } from '../../content/files.ts';
 import { csvToDb } from '../../content/csv.ts';
+import {
+  addLinkedViewOps, filterGroup, filterLeaf, LINKED_VIEW_TYPES, newLinkedDatabase, propertyIdOf, viewSorts, ViewSpecError, type LinkedViewSpec, type LinkedViewType,
+  type ViewFilterCondition,
+} from '../../content/linkedViews.ts';
 
 const MAX_BLOCKS_PER_CALL = 3000;
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many.replace('{n}', String(n)));
@@ -785,6 +789,153 @@ export const updateDatabase: ToolRun = async (env, input, stepId) => {
 };
 
 // ---------------------------------------------------------------------------------------------
+// create_linked_views
+
+const LINKED_CONDITION: Record<string, ViewFilterCondition> = {
+  equals: 'equals', not_equals: 'does_not_equal', contains: 'contains', not_contains: 'does_not_contain', starts_with: 'starts_with', ends_with: 'ends_with',
+  greater_than: 'greater_than', less_than: 'less_than', before: 'before', after: 'after', on_or_before: 'on_or_before', on_or_after: 'on_or_after',
+  is_empty: 'is_empty', is_not_empty: 'is_not_empty',
+};
+const WITHIN_RANGES = new Set(['this_week', 'past_week', 'past_month', 'past_year', 'next_week', 'next_month', 'next_year']);
+
+interface LinkedViewInput {
+  database_id: string;
+  type?: string;
+  name?: string;
+  group_by?: string;
+  date_property?: string;
+  filters?: { property: string; operator: string; value?: string }[];
+  filter_match?: 'and' | 'or';
+  sort?: { property: string; direction?: string }[];
+  chart_type?: string;
+  aggregate?: { function?: string; property?: string };
+}
+
+/** One requested view → its spec over the source as the user may see it (hidden properties can't be filtered on). */
+function linkedViewSpec(env: AgentEnv, v: LinkedViewInput): { spec: LinkedViewSpec; sourceName: string } {
+  const { col } = databaseOf(v.database_id, env.userId);
+  const sourceName = toPlainText(col.name) || 'Untitled database';
+  const schema = col.schema ?? {};
+  const fail = (e: unknown): never => {
+    if (e instanceof ViewSpecError) throw new AiError('bad_request', `${sourceName}: ${e.message}`, 400);
+    throw e;
+  };
+  try {
+    const type = ((LINKED_VIEW_TYPES as readonly string[]).includes(v.type ?? '') ? v.type : 'table') as LinkedViewType;
+    const prop = (name: string | undefined, what: string, types?: string[]) => {
+      if (!name) return undefined;
+      const pid = propertyIdOf(schema, name);
+      if (!pid || (types && !types.includes(schema[pid].type))) throw new ViewSpecError(`No ${what} property “${name}”.`);
+      return pid;
+    };
+    const leaves = (v.filters ?? []).map((f) => {
+      let condition: string = LINKED_CONDITION[f.operator] ?? f.operator;
+      let value: unknown = f.value;
+      if (f.operator === 'within') {
+        const range = String(f.value ?? '').trim().toLowerCase().replace(/^the_/, '');
+        if (!WITHIN_RANGES.has(range)) throw new ViewSpecError(`“within” takes one of ${[...WITHIN_RANGES].join(', ')}.`);
+        condition = range;
+        value = undefined;
+      }
+      return filterLeaf(schema, f.property, condition, value, { person: (n) => resolvePeople(env.spaceId, [n]).ids[0] ?? null });
+    });
+    return {
+      sourceName,
+      spec: {
+        source: col, type, name: v.name?.trim() || undefined,
+        groupBy: prop(v.group_by, type === 'board' ? 'select or status' : 'group', type === 'board' ? ['select', 'status', 'multi_select', 'person'] : undefined),
+        dateProperty: prop(v.date_property, 'date', ['date', 'created_time', 'last_edited_time']),
+        filter: leaves.length ? filterGroup(v.filter_match === 'or' ? 'or' : 'and', leaves) : undefined,
+        sort: v.sort?.length ? viewSorts(schema, v.sort) : undefined,
+        chart: type === 'chart' ? { type: 'chart', chart_type: v.chart_type, aggregate: v.aggregate, group_by: v.group_by } : undefined,
+      },
+    };
+  } catch (e) {
+    return fail(e);
+  }
+}
+
+export const createLinkedViews: ToolRun = async (env, input, stepId) => {
+  const wanted = input.views as LinkedViewInput[];
+  const built = wanted.map((v) => linkedViewSpec(env, v));
+  const specs = built.map((x) => x.spec);
+  const summary = built.map((x, i) => ({
+    name: x.spec.name ?? x.sourceName,
+    value: `${x.sourceName} · ${x.spec.type}${wanted[i].filters?.length ? ` · ${wanted[i].filters!.map((f) => `${f.property} ${f.operator}${f.value !== undefined ? ` ${f.value}` : ''}`).join(wanted[i].filter_match === 'or' ? ' or ' : ' and ')}` : ''}`,
+  }));
+  const names = built.map((x) => x.spec.name ?? x.sourceName);
+
+  // new tabs of an existing database / linked database
+  if (input.target_database_id) {
+    const { block } = databaseOf(String(input.target_database_id), env.userId);
+    const name = blockTitle(block) || toPlainText(getRecord<CollectionRecord>('collection', block.collection_id ?? '')?.name) || 'Untitled database';
+    if (!canEditStructure(block, env.userId)) throw new AiError('forbidden', block.format?.block_locked ? `“${name}” is locked, so its views can’t change.` : `The user can’t add views to “${name}”.`, 403);
+    const { ops, viewIds } = addLinkedViewOps(block, specs);
+    return execute(env, stepId, {
+      checkpoint: [versionedPageOf(block)],
+      tool: 'create_linked_views',
+      ops,
+      pages: [{ pageId: block.id, title: name, action: 'updated', database: true }],
+      risk: 'edit',
+      approval: { title: `Add ${plural(specs.length, 'a linked view', '{n} linked views')} to “${name}”`, properties: summary, pages: [{ pageId: block.id, title: name }], confirmLabel: 'Continue' },
+      running: 'Adding linked views',
+      done: plural(specs.length, 'Added 1 linked view', 'Added {n} linked views'),
+      declined: 'Add linked views',
+      detail: name,
+      result: () => `Added to “${name}” (database_id: ${block.id}): ${names.map((n, i) => `${n} (view_id: ${viewIds[i]})`).join(', ')}.`,
+    });
+  }
+
+  const parent = resolveParent(input.parent, env.userId, env.spaceId, null);
+  if (parent.kind === 'database') throw new AiError('bad_request', 'Linked views go on a page. To add them as tabs of a database, use target_database_id.', 400);
+  const title = typeof input.title === 'string' ? input.title.trim().slice(0, 200) : '';
+  if (!title && parent.kind !== 'page') throw new AiError('bad_request', 'Give a title for the new overview page, or a page parent to add the views to.', 400);
+  const b = new OpsBuilder(parent.spaceId, env.userId);
+  const groups = input.layout === 'stacked' ? specs.map((s) => [s]) : [specs];
+  const blocks: Spec[] = [];
+  const after: Operation[] = [];
+  const viewIds: string[] = [];
+  groups.forEach((g, i) => {
+    const db = newLinkedDatabase(parent.spaceId, g);
+    after.push(...db.ops);
+    viewIds.push(...db.viewIds);
+    if (input.layout === 'stacked') blocks.push({ type: 'sub_header', text: names[i] });
+    blocks.push({ type: 'collection_view', id: db.blockId, format: db.format });
+  });
+  let pageId: string;
+  let pageTitle: string;
+  if (title) {
+    pageId = placeUnder(b, parent, env.userId, { type: 'page', text: inlineRichText(title), children: blocks });
+    pageTitle = title;
+  } else {
+    pageId = (parent as { id: string }).id;
+    pageTitle = parent.title;
+    for (const spec of blocks) placeUnder(b, parent, env.userId, spec);
+  }
+  b.ops.push(...after);
+  if (parent.kind === 'page') b.ops.push(touch({ id: parent.id, spaceId: parent.spaceId }, env.userId));
+  const where = parent.kind === 'private' ? 'Private' : parent.title;
+  return execute(env, stepId, {
+    tool: 'create_linked_views',
+    ops: b.ops,
+    pages: [{ pageId, title: pageTitle, action: title ? 'created' : 'updated' }],
+    risk: 'edit',
+    approval: {
+      title: title ? `Create “${title}” with ${plural(specs.length, '1 linked view', '{n} linked views')}` : `Add ${plural(specs.length, 'a linked view', '{n} linked views')} to “${pageTitle}”`,
+      description: title ? `In ${where}` : undefined,
+      properties: summary,
+      pages: [{ title: pageTitle }],
+      confirmLabel: 'Continue',
+    },
+    running: 'Adding linked views',
+    done: plural(specs.length, 'Added 1 linked view', 'Added {n} linked views'),
+    declined: 'Add linked views',
+    detail: pageTitle,
+    result: () => `${title ? `Created “${title}” (page_id: ${pageId})` : `Added to “${pageTitle}” (page_id: ${pageId})`} with live linked views: ${names.map((n, i) => `${n} (view_id: ${viewIds[i]})`).join(', ')}. They always show the databases’ current rows.`,
+  });
+};
+
+// ---------------------------------------------------------------------------------------------
 // Comments
 
 /** Comment text with "@Name" turned into user mentions of workspace members. */
@@ -1065,6 +1216,7 @@ export const WRITE_TOOL_RUNS: Record<string, ToolRun> = {
   move_pages: movePages,
   create_database: createDatabase,
   update_database: updateDatabase,
+  create_linked_views: createLinkedViews,
   add_comment: addComment,
   update_notifications: updateNotifications,
   update_memory: updateMemory,

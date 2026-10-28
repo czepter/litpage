@@ -12,6 +12,8 @@ import { redactDatabaseRecord } from '../propaccess.ts';
 import { viewerQueryContext } from '../queryctx.ts';
 import { appUrl } from '../mail.ts';
 import { pageLink } from '../notify.ts';
+import { blockRole } from '../records.ts';
+import { sourceIdsOf } from '../content/linkedViews.ts';
 import { dateToApi, iso, toApiRichText, type ApiRichText } from './richtext.ts';
 import type { Principal } from './principal.ts';
 
@@ -438,7 +440,11 @@ export function databaseObject(block: BlockRecord, ctx: ReadCtx): Json {
     parent: parentObject(block, ctx.p), url: pageLink(block.id), public_url: null, ...trashFields(block),
     is_inline: block.type === 'collection_view', is_locked: !!fmt.block_locked,
   };
-  out.data_sources = col ? [{ id: col.id, name: toPlainText(col.name as RichText | undefined) }] : [];
+  // linked databases show the sources of other databases too (only the ones the principal can open)
+  out.data_sources = sourceIdsOf(block)
+    .map((id) => getRecord<CollectionRecord>('collection', id))
+    .filter((c): c is CollectionRecord => !!c && c.alive !== false && blockRole(c.parent_id, ctx.p.id) !== 'none')
+    .map((c) => ({ id: c.id, name: toPlainText(c.name as RichText | undefined) }));
   return out;
 }
 

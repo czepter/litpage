@@ -458,6 +458,7 @@ const MCP_TOOLS: McpToolDef[] = [
   { name: 'lit-restore-pages', title: 'Restore from Trash', agent: 'restore_pages', readOnly: false },
   { name: 'lit-create-database', title: 'Add a database', agent: 'create_database', readOnly: false },
   { name: 'lit-update-database', title: 'Update a database', agent: 'update_database', readOnly: false },
+  { name: 'lit-create-linked-views', title: 'Create linked views', agent: 'create_linked_views', readOnly: false },
   { name: 'lit-create-comment', title: 'Create a comment', agent: 'add_comment', readOnly: false },
 ];
 
