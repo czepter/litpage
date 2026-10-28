@@ -144,7 +144,7 @@ database and uploaded files) lives in the `litpage-data` volume.
 
 ### From source
 
-Requirements: Node.js 26 or later and pnpm 10 (`npm install -g pnpm@10.32.1`).
+Requirements: Node.js 26 or later and pnpm 10 (`npm install -g pnpm@10.34.9`).
 
 ```bash
 pnpm install

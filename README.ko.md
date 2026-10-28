@@ -125,7 +125,7 @@ http://localhost:3001 에서 그 이메일과 비밀번호로 로그인합니다
 
 ### 소스에서
 
-필요: Node.js 26 이상, pnpm 10(`npm install -g pnpm@10.32.1`).
+필요: Node.js 26 이상, pnpm 10(`npm install -g pnpm@10.34.9`).
 
 ```bash
 pnpm install
