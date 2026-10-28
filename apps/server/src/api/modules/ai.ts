@@ -30,6 +30,7 @@ import { addConnection, createPreset, deletePreset, listConnections, listPresets
 import { audit } from '../../audit.ts';
 import {
   approveClients, clientMembers, createToken, disableMyClient, disconnectClient, listClients, listTokens, MCP_CLIENT_CATALOG, removeApprovedClient, renameClient, revokeAll, revokeToken, setClientRestriction,
+  setTokenWorkspaces, tokenWorkspaces,
 } from '../../ai/litMcp.ts';
 import { placeUnder, spaceViewOf } from '../../ai/edit.ts';
 import { OpsBuilder } from '../../content/spec.ts';
@@ -621,12 +622,27 @@ export const handlers = {
     return guarded(() => createToken(userId, spaceId, String(body?.name ?? '')));
   },
 
+  /** With spaceId: a connection made in another workspace only loses this one. */
   mcpRevokeToken(ctx: Ctx, body: any) {
     const userId = uid(ctx);
+    const spaceId = body?.spaceId ? member(body.spaceId, userId) : undefined;
     return guarded(() => {
-      revokeToken(userId, String(body?.tokenId ?? ''));
+      revokeToken(userId, String(body?.tokenId ?? ''), spaceId);
       return {};
     });
+  },
+
+  /** Settings › Litpage MCP › Workspaces: the caller's workspaces and which ones a connection of theirs reaches. */
+  mcpTokenWorkspaces(ctx: Ctx, body: any) {
+    const userId = uid(ctx);
+    return guarded(() => ({ workspaces: tokenWorkspaces(userId, String(body?.tokenId ?? '')) }));
+  },
+
+  /** Add or remove workspaces of a connection (its home stays). */
+  mcpSetTokenWorkspaces(ctx: Ctx, body: any) {
+    const userId = uid(ctx);
+    const ids = Array.isArray(body?.spaceIds) ? body.spaceIds.filter((s: unknown): s is string => typeof s === 'string') : [];
+    return guarded(() => ({ token: setTokenWorkspaces(userId, String(body?.tokenId ?? ''), ids) }));
   },
 
   /** Settings › MCP › Enabled clients › Disable / Remove: the caller's tokens connected with that client stop. */

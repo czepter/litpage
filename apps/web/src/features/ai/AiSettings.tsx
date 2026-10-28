@@ -10,7 +10,7 @@ import { useUI } from '../../lib/store/ui.ts';
 import { useSession } from '../../lib/store/session.ts';
 import { navigate } from '../../lib/router.ts';
 import { Icon } from '../../components/Icon.tsx';
-import { Button, Group, Row, Switch, confirmDialog } from '../settings/ui.tsx';
+import { Button, Group, Row, Switch, confirmDialog, openSubDialog } from '../settings/ui.tsx';
 import { saveSpaceSettings, spaceSetting, useSpaceAccess } from '../settings/spaceSettings.ts';
 import { SHARED_CHATS_EVENT, shareChat, useAiStatus } from './aiApi.ts';
 import { useConnections, type McpConnection } from './aiStores.ts';
@@ -234,7 +234,56 @@ export function AiWorkspaceControls() {
 
 
 
-interface TokenInfo { id: string; name: string; prefix: string; userId: string; userName?: string; createdTime: number; lastUsedTime: number | null; oauth?: boolean }
+interface TokenInfo { id: string; name: string; prefix: string; userId: string; userName?: string; createdTime: number; lastUsedTime: number | null; oauth?: boolean; homeSpaceId: string; workspaces: { id: string; name: string }[] }
+interface TokenWorkspace { id: string; name: string; icon: string | null; home: boolean; on: boolean; problem: string | null }
+
+/** Workspaces a connection reaches besides its home: tick more, save — the MCP client needs no new connection. */
+function TokenWorkspaces({ token, close }: { token: TokenInfo; close: () => void }) {
+  const [list, setList] = useState<TokenWorkspace[] | null>(null);
+  const [on, setOn] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    api<{ workspaces: TokenWorkspace[] }>('mcpTokenWorkspaces', { tokenId: token.id })
+      .then((r) => { setList(r.workspaces); setOn(r.workspaces.filter((w) => w.on && !w.home).map((w) => w.id)); })
+      .catch((e) => { useUI.getState().toast((e as Error)?.message || 'Couldn’t load your workspaces'); close(); });
+  }, [token.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  const save = async () => {
+    setBusy(true);
+    try {
+      await api('mcpSetTokenWorkspaces', { tokenId: token.id, spaceIds: on });
+      useUI.getState().toast('Workspaces saved');
+      close();
+    } catch (e) {
+      useUI.getState().toast((e as Error)?.message || 'Couldn’t save the workspaces');
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="nc-ai-mcp-members" data-testid="mcp-token-workspaces">
+      <div className="ttl">Workspaces for “{token.name}”</div>
+      <div className="desc">The connection can work in every workspace you tick. Your MCP client keeps its connection; tools pick the workspace by the page they work on, or by name.</div>
+      {list === null ? <div className="nc-set-row-desc">Loading…</div> : (
+        <div className="nc-ai-mcp-pick">
+          {list.map((w) => {
+            const checked = w.home || on.includes(w.id);
+            const locked = w.home || (!!w.problem && !checked);
+            return (
+              <label key={w.id} className={`nc-agent-picker-row ${checked ? 'on' : ''}`} data-space-id={w.id} title={w.problem ?? undefined}>
+                <input type="checkbox" checked={checked} disabled={locked} onChange={(e) => setOn(e.target.checked ? [...on, w.id] : on.filter((x) => x !== w.id))} />
+                <span className="nc-ellipsis">{w.icon ? `${w.icon} ` : ''}{w.name}</span>
+                <span className="nc-agent-picker-hint nc-ellipsis">{w.home ? 'Main workspace' : w.problem && !checked ? w.problem : ''}</span>
+              </label>
+            );
+          })}
+        </div>
+      )}
+      <div className="actions">
+        <Button onClick={close}>Cancel</Button>
+        <Button variant="primary" disabled={!list || busy} onClick={() => void save()}>Save</Button>
+      </div>
+    </div>
+  );
+}
 
 
 export function LitMcpAccess() {
@@ -271,13 +320,18 @@ export function LitMcpAccess() {
     }
   };
   const revoke = async (t: TokenInfo) => {
-    if (!(await confirmDialog({ title: `Revoke “${t.name}”?`, description: 'Apps using this token will lose access to the workspace right away.', confirmLabel: 'Revoke', danger: true }))) return;
-    await api('mcpRevokeToken', { tokenId: t.id }).catch((e) => useUI.getState().toast((e as Error)?.message));
+    // a connection made in another workspace only loses this one
+    const added = t.homeSpaceId !== space.id;
+    if (!(await confirmDialog(added
+      ? { title: `Remove “${t.name}” from this workspace?`, description: 'The connection keeps working in its other workspaces, but can’t reach this one anymore.', confirmLabel: 'Remove', danger: true }
+      : { title: `Revoke “${t.name}”?`, description: t.workspaces.length > 1 ? `Apps using this connection will lose access to all its workspaces (${t.workspaces.map((w) => w.name).join(', ')}) right away.` : 'Apps using this token will lose access to the workspace right away.', confirmLabel: 'Revoke', danger: true }))) return;
+    await api('mcpRevokeToken', { tokenId: t.id, spaceId: space.id }).catch((e) => useUI.getState().toast((e as Error)?.message));
     void load();
   };
+  const editWorkspaces = (t: TokenInfo) => openSubDialog((close) => <TokenWorkspaces token={t} close={() => { close(); void load(); }} />);
   return (
     <div className="nc-ai-set" data-testid="lit-mcp-access">
-      <Group plain title="Connect with an access token" description="Add the server URL to any MCP client. Clients that support OAuth (Claude, ChatGPT, Cursor, VS Code…) ask you to sign in and pick a workspace; others use a personal access token. Tools act as you, with your permissions.">
+      <Group plain title="Connect with an access token" description="Add the server URL to any MCP client. Clients that support OAuth (Claude, ChatGPT, Cursor, VS Code…) ask you to sign in and pick workspaces; others use a personal access token. One connection can reach several of your workspaces — add more under Workspaces without connecting again. Tools act as you, with your permissions.">
         <Row label="Server URL" description={<code className="nc-ai-set-code">{serverUrl}</code>} control={<Button small onClick={() => { void navigator.clipboard?.writeText(serverUrl).catch(() => {}); useUI.getState().toast('Copied'); }}>Copy</Button>} />
         {owner && (
           <Row
@@ -301,10 +355,18 @@ export function LitMcpAccess() {
         </div>
         {tokens.length > 0 && (
           <table className="nc-set-table nc-ai-usage-table">
-            <thead><tr><th>Name</th><th>Token</th><th>Created</th><th>Last used</th><th /></tr></thead>
+            <thead><tr><th>Name</th><th>Token</th><th>Workspaces</th><th>Created</th><th>Last used</th><th /></tr></thead>
             <tbody>
               {tokens.map((t) => (
-                <tr key={t.id}><td>{t.name}</td><td>{t.oauth ? 'OAuth' : <code>{t.prefix}…</code>}</td><td>{fmtTime(t.createdTime)}</td><td>{fmtTime(t.lastUsedTime)}</td><td><Button small variant="danger" onClick={() => void revoke(t)}>Revoke</Button></td></tr>
+                <tr key={t.id}>
+                  <td>{t.name}</td><td>{t.oauth ? 'OAuth' : <code>{t.prefix}…</code>}</td><td>{t.workspaces.map((w) => w.name).join(', ')}</td><td>{fmtTime(t.createdTime)}</td><td>{fmtTime(t.lastUsedTime)}</td>
+                  <td>
+                    <div className="nc-ai-set-token-actions">
+                      <Button small onClick={() => editWorkspaces(t)}>Workspaces</Button>
+                      <Button small variant="danger" onClick={() => void revoke(t)}>{t.homeSpaceId === space.id ? 'Revoke' : 'Remove'}</Button>
+                    </div>
+                  </td>
+                </tr>
               ))}
             </tbody>
           </table>
@@ -317,7 +379,7 @@ export function LitMcpAccess() {
               <thead><tr><th>Member</th><th>Name</th><th>Created</th><th>Last used</th><th /></tr></thead>
               <tbody>
                 {all.map((t) => (
-                  <tr key={t.id}><td>{t.userName || 'Unknown'}</td><td>{t.name}</td><td>{fmtTime(t.createdTime)}</td><td>{fmtTime(t.lastUsedTime)}</td><td><Button small variant="danger" onClick={() => void revoke(t)}>Revoke</Button></td></tr>
+                  <tr key={t.id}><td>{t.userName || 'Unknown'}</td><td>{t.name}{t.homeSpaceId !== space.id ? <div className="nc-set-row-desc">Added from {t.workspaces[0]?.name ?? 'another workspace'}</div> : null}</td><td>{fmtTime(t.createdTime)}</td><td>{fmtTime(t.lastUsedTime)}</td><td><Button small variant="danger" onClick={() => void revoke(t)}>{t.homeSpaceId === space.id ? 'Revoke' : 'Remove'}</Button></td></tr>
                 ))}
               </tbody>
             </table>

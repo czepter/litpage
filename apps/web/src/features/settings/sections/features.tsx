@@ -797,7 +797,7 @@ export function DeveloperSection() {
   useEffect(load, [space?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   const revoke = async (p: PatInfo) => {
     try {
-      await api('mcpRevokeToken', { tokenId: p.id });
+      await api('mcpRevokeToken', { tokenId: p.id, spaceId: space?.id });
       useUI.getState().toast(t('lp.settings.token_revoked', 'Token revoked'));
       load();
     } catch (e) {

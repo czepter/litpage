@@ -5,7 +5,8 @@
 //   GET  /.well-known/oauth-authorization-server              authorization server metadata (RFC 8414)
 //   POST /oauth/register   dynamic client registration (RFC 7591); public clients or client_secret_post/basic
 //   GET  /oauth/authorize  consent page (signed-out visitors take the login detour and come back); PKCE S256 only
-//   POST /oauth/authorize  the consent form: redirects back with a single-use code (or access_denied)
+//   POST /oauth/authorize  the consent form: redirects back with a single-use code (or access_denied); the person can
+//                          pick several workspaces — the first is the grant's home, the others are added to it
 //   POST /oauth/token      authorization_code (PKCE) and refresh_token grants; refresh tokens rotate on every use
 //   POST /oauth/revoke     token revocation (RFC 7009)
 // Each grant is a row of mcp_tokens (ai/litMcp.ts) for one person, workspace and client: it shows up in Settings →
@@ -17,14 +18,14 @@ import type { Context, Hono } from 'hono';
 import { getConnInfo } from '@hono/node-server/conninfo';
 import { newId } from '@nc/shared/ids.ts';
 import { isSpaceMember } from '@nc/shared/permissions.ts';
-import type { SpaceRecord, SpaceViewRecord, UserRecord, UserRootRecord } from '@nc/shared/records.ts';
+import type { SpaceRecord, UserRecord } from '@nc/shared/records.ts';
 import { db, getRecord } from '../db.ts';
 import { parseCookies, userForToken } from '../auth.ts';
 import { esc } from '../mail.ts';
 import { hit } from '../ratelimit.ts';
 import { DEMO_MESSAGE, isDemoMode } from '../demo.ts';
 import { workspaceAiPolicy } from './aiPolicy.ts';
-import { activeTokenCount, CLIENT_NOT_APPROVED, clientAllowed, hash, identifyClient, MAX_TOKENS } from './litMcp.ts';
+import { activeTokenCount, connectableSpaces, hash, identifyClient, linkSpaces, MAX_TOKENS, spaceProblem } from './litMcp.ts';
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS oauth_clients (
@@ -50,6 +51,12 @@ CREATE TABLE IF NOT EXISTS oauth_codes (
   token_id TEXT
 );
 `);
+// more workspaces chosen at consent (JSON list, besides space_id)
+try {
+  db.exec('ALTER TABLE oauth_codes ADD COLUMN extra_space_ids TEXT');
+} catch {
+  /* column exists */
+}
 
 const CODE_TTL_MS = 10 * 60_000;
 const ACCESS_TTL_S = 3600;
@@ -254,35 +261,26 @@ function withParams(uri: string, params: Record<string, string>): string {
   return u.toString();
 }
 
-/** Workspaces the person can connect: member, and Litpage MCP is on there. */
-function connectableSpaces(userId: string): SpaceRecord[] {
-  const root = getRecord<UserRootRecord>('user_root', userId);
-  const out: SpaceRecord[] = [];
-  for (const id of root?.space_views ?? []) {
-    const sv = getRecord<SpaceViewRecord>('space_view', id);
-    if (!sv || sv.alive === false || sv.parent_id !== userId) continue;
-    const s = getRecord<SpaceRecord>('space', sv.space_id);
-    if (s && isSpaceMember(s, userId) && workspaceAiPolicy(s.id).litMcp && !out.some((o) => o.id === s.id)) out.push(s);
-  }
-  return out;
-}
-
 /** Ties the consent form to the signed-in session (on top of the same-origin check for POSTs). */
 const csrfFor = (session: string) => hash(`oauth-consent:${session}`).slice(0, 32);
 
-/** The consent decision: a single-use code for the chosen workspace. */
-export function issueCode(req: AuthorizeRequest, userId: string, spaceId: string): string {
-  const space = getRecord<SpaceRecord>('space', spaceId);
-  if (!isSpaceMember(space, userId)) throw new OAuthError('access_denied', 'You aren’t a member of this workspace.', 403);
-  if (!workspaceAiPolicy(spaceId).litMcp) throw new OAuthError('access_denied', 'Litpage MCP is turned off for this workspace.', 403);
-  if (!clientAllowed(spaceId, userId, identifyClient(req.client.client_name).key)) throw new OAuthError('access_denied', CLIENT_NOT_APPROVED, 403);
+/** The consent decision: a single-use code for the chosen workspaces (the first is the grant's home). */
+export function issueCode(req: AuthorizeRequest, userId: string, spaceIds: string | string[]): string {
+  const ids = [...new Set((Array.isArray(spaceIds) ? spaceIds : [spaceIds]).map(String).filter(Boolean))].slice(0, 50);
+  const spaceId = ids[0];
+  if (!spaceId) throw new OAuthError('access_denied', 'Choose a workspace to connect.', 400);
+  const key = identifyClient(req.client.client_name).key;
+  for (const id of ids) {
+    const problem = spaceProblem(id, userId, key);
+    if (problem) throw new OAuthError('access_denied', ids.length > 1 ? `${getRecord<SpaceRecord>('space', id)?.name || 'Workspace'}: ${problem}` : problem, 403);
+  }
   const replaced = (db.prepare('SELECT COUNT(*) AS n FROM mcp_tokens WHERE user_id = ? AND space_id = ? AND oauth_client_id = ? AND revoked_time IS NULL').get(userId, spaceId, req.client.client_id) as { n: number }).n;
   if (activeTokenCount(userId, spaceId) - replaced >= MAX_TOKENS) throw new OAuthError('access_denied', `You can have up to ${MAX_TOKENS} active MCP connections in this workspace. Revoke one in Settings → Litpage MCP.`, 400);
   const code = `lp_oac_${randomBytes(32).toString('base64url')}`;
   const now = Date.now();
   db.prepare('DELETE FROM oauth_codes WHERE expires_time < ?').run(now - 86400_000);
-  db.prepare('INSERT INTO oauth_codes (code_hash, client_id, user_id, space_id, redirect_uri, code_challenge, resource, expires_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-    .run(hash(code), req.client.client_id, userId, spaceId, req.redirectUri, req.codeChallenge, req.resource ?? null, now + CODE_TTL_MS);
+  db.prepare('INSERT INTO oauth_codes (code_hash, client_id, user_id, space_id, redirect_uri, code_challenge, resource, expires_time, extra_space_ids) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(hash(code), req.client.client_id, userId, spaceId, req.redirectUri, req.codeChallenge, req.resource ?? null, now + CODE_TTL_MS, ids.length > 1 ? JSON.stringify(ids.slice(1)) : null);
   return code;
 }
 
@@ -311,7 +309,7 @@ const s256 = (verifier: string) => Buffer.from(hash(verifier), 'hex').toString('
 export function exchangeCode(c: Context, client: ClientRow, form: Record<string, string>): TokenResponse {
   const code = form.code ?? '';
   const row = /^lp_oac_[A-Za-z0-9_-]{20,}$/.test(code)
-    ? db.prepare('SELECT * FROM oauth_codes WHERE code_hash = ?').get(hash(code)) as { client_id: string; user_id: string; space_id: string; redirect_uri: string; code_challenge: string; resource: string | null; expires_time: number; used_time: number | null; token_id: string | null } | undefined
+    ? db.prepare('SELECT * FROM oauth_codes WHERE code_hash = ?').get(hash(code)) as { client_id: string; user_id: string; space_id: string; redirect_uri: string; code_challenge: string; resource: string | null; expires_time: number; used_time: number | null; token_id: string | null; extra_space_ids: string | null } | undefined
     : undefined;
   if (!row || row.client_id !== client.client_id) throw new OAuthError('invalid_grant', 'The authorization code is invalid.');
   if (row.used_time) {
@@ -337,6 +335,14 @@ export function exchangeCode(c: Context, client: ClientRow, form: Record<string,
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .run(id, row.user_id, row.space_id, client.client_name.slice(0, 60), hash(t.access), t.access.slice(0, 12), now, cl.key, cl.name, client.client_id, now + ACCESS_TTL_S * 1000, hash(t.refresh), now + REFRESH_TTL_MS);
   db.prepare('UPDATE oauth_codes SET token_id = ? WHERE code_hash = ?').run(id, hash(code));
+  let extra: string[] = [];
+  try {
+    extra = row.extra_space_ids ? (JSON.parse(row.extra_space_ids) as string[]) : [];
+  } catch {
+    /* none */
+  }
+  // the other workspaces chosen at consent, those that can still be connected
+  linkSpaces(id, extra.filter((s) => typeof s === 'string' && !spaceProblem(s, row.user_id, cl.key)));
   db.prepare('UPDATE oauth_clients SET last_used_time = ? WHERE client_id = ?').run(now, client.client_id);
   return t.response(t.access, t.refresh);
 }
@@ -409,11 +415,10 @@ function hostOf(uri: string): string {
 
 function consentPage(req: AuthorizeRequest, userId: string, session: string, problem?: string): Response {
   const user = getRecord<UserRecord>('lit_user', userId);
-  const key = identifyClient(req.client.client_name).key;
-  const spaces = connectableSpaces(userId).filter((s) => clientAllowed(s.id, userId, key));
+  const spaces = connectableSpaces(userId, identifyClient(req.client.client_name).key);
   const name = esc(req.client.client_name);
   const hidden = (k: string, v: string | undefined) => (v ? `<input type="hidden" name="${k}" value="${esc(v)}">` : '');
-  const list = spaces.map((s, i) => `<label class="ws"><input type="radio" name="space_id" value="${esc(s.id)}"${i === 0 ? ' checked' : ''}> ${esc(s.icon && s.icon.length <= 4 ? `${s.icon} ` : '')}${esc(s.name)}</label>`).join('');
+  const list = spaces.map((s, i) => `<label class="ws"><input type="checkbox" name="space_id" value="${esc(s.id)}"${i === 0 ? ' checked' : ''}> ${esc(s.icon && s.icon.length <= 4 ? `${s.icon} ` : '')}${esc(s.name)}</label>`).join('');
   const nonce = randomBytes(16).toString('base64');
   return page(`Connect ${req.client.client_name} to Litpage`, `
 <h1>${name} wants to access your Litpage workspace</h1>
@@ -423,7 +428,7 @@ ${problem ? `<p role="alert"><strong>${esc(problem)}</strong></p>` : ''}
 <form method="post" action="/oauth/authorize">
 ${hidden('client_id', req.client.client_id)}${hidden('redirect_uri', req.redirectUri)}${hidden('state', req.state)}${hidden('code_challenge', req.codeChallenge)}${hidden('resource', req.resource)}
 <input type="hidden" name="response_type" value="code"><input type="hidden" name="code_challenge_method" value="S256"><input type="hidden" name="csrf" value="${csrfFor(session)}">
-${spaces.length ? `<fieldset><legend>Workspace</legend>${list}</fieldset>` : `<p><strong>None of your workspaces can be connected.</strong> Litpage MCP is turned off, or a workspace owner hasn’t approved ${name}.</p>`}
+${spaces.length ? `<fieldset><legend>${spaces.length > 1 ? 'Workspaces' : 'Workspace'}</legend>${list}${spaces.length > 1 ? '<p class="muted">The first one you tick is the main workspace. You can add or remove workspaces later in Settings → Litpage MCP.</p>' : ''}</fieldset>` : `<p><strong>None of your workspaces can be connected.</strong> Litpage MCP is turned off, or a workspace owner hasn’t approved ${name}.</p>`}
 <p class="muted">You’ll be sent back to <code>${esc(hostOf(req.redirectUri))}</code>. You can disconnect it anytime in Settings → Litpage MCP.</p>
 <div class="actions"><button type="submit" name="decision" value="deny">Cancel</button>${spaces.length ? '<button type="submit" name="decision" value="allow" class="primary">Allow access</button>' : ''}</div>
 </form>`, nonce);
@@ -452,7 +457,8 @@ async function formOf(c: Context): Promise<Record<string, string>> {
   if (!/^application\/x-www-form-urlencoded\b/i.test(type)) return out;
   const text = await c.req.text();
   if (text.length > 64 * 1024) return out;
-  for (const [k, v] of new URLSearchParams(text)) out[k] = v;
+  // repeated space_id (several workspaces ticked) comes back comma-separated
+  for (const [k, v] of new URLSearchParams(text)) out[k] = k === 'space_id' && out[k] ? `${out[k]},${v}` : v;
   return out;
 }
 
@@ -552,7 +558,7 @@ export function registerMcpOAuth(app: Hono) {
     if (form.decision !== 'allow') return back({ error: 'access_denied', error_description: 'The person declined access.' });
     if (!hit(`oauth:consent:${userId}`, 30, 60_000)) return errorPage('Too many attempts. Try again shortly.', 429);
     try {
-      return back({ code: issueCode(req, userId, String(form.space_id ?? '')) });
+      return back({ code: issueCode(req, userId, String(form.space_id ?? '').split(',')) });
     } catch (e) {
       if (e instanceof OAuthError) return consentPage(req, userId, session, e.message);
       throw e;

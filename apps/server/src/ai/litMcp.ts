@@ -13,11 +13,17 @@
 // OAuth (ai/mcpOAuth.ts): clients that support MCP authorization sign the person in instead of pasting a token; each
 // grant is a row here too ("lp_oat_…" access tokens that expire, rotated with a refresh token), so listing,
 // revocation and the client policy treat both kinds alike. The client of an OAuth row is its registration.
+// More workspaces: a connection belongs to the workspace it was made in (its home, mcp_tokens.space_id) and can reach
+// more of its person's workspaces (mcp_token_spaces) — chosen at OAuth consent or added later in Settings → Litpage
+// MCP, so one MCP client connector (one server URL) works across workspaces. Each call works in one workspace: the
+// tools' optional workspace_id, else the workspace of the page or database it names, else the home; that
+// workspace's "Allow Litpage MCP" and approved clients apply to the call. Owners of a workspace the connection was
+// added to see it in their lists; revoking it there removes only that workspace from the connection.
 import { createHash, randomBytes } from 'node:crypto';
-import { newId } from '@nc/shared/ids.ts';
+import { expandId, newId } from '@nc/shared/ids.ts';
 import { isSpaceMember } from '@nc/shared/permissions.ts';
 import { isSpaceOwner } from '../policy.ts';
-import type { BlockRecord, SpaceRecord, UserRecord, UserSettingsRecord } from '@nc/shared/records.ts';
+import type { BlockRecord, SpaceRecord, SpaceViewRecord, UserRecord, UserRootRecord, UserSettingsRecord } from '@nc/shared/records.ts';
 import { db, getRecord } from '../db.ts';
 import { audit } from '../audit.ts';
 import { realtime } from '../realtime.ts';
@@ -58,6 +64,15 @@ for (const col of ['client_key TEXT', 'client_name TEXT', 'first_connected_time 
   }
 }
 db.exec('CREATE INDEX IF NOT EXISTS idx_mcp_tokens_refresh ON mcp_tokens(refresh_hash)');
+db.exec(`
+CREATE TABLE IF NOT EXISTS mcp_token_spaces (
+  token_id TEXT NOT NULL,
+  space_id TEXT NOT NULL,
+  added_time INTEGER NOT NULL,
+  PRIMARY KEY (token_id, space_id)
+);
+CREATE INDEX IF NOT EXISTS idx_mcp_token_spaces_space ON mcp_token_spaces(space_id);
+`);
 
 export const MCP_PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 export const hash = (t: string) => createHash('sha256').update(t).digest('hex');
@@ -74,6 +89,10 @@ export interface McpTokenInfo {
   lastUsedTime: number | null;
   /** connected through OAuth (no token to copy; the client signs in again after revocation) */
   oauth: boolean;
+  /** the workspace the connection was made in */
+  homeSpaceId: string;
+  /** every workspace the connection reaches, home first */
+  workspaces: { id: string; name: string }[];
 }
 
 interface TokenRow {
@@ -90,8 +109,29 @@ interface TokenRow {
 
 const info = (r: TokenRow): McpTokenInfo => ({
   id: r.id, name: r.name, prefix: r.prefix, userId: r.user_id, userName: getRecord<UserRecord>('lit_user', r.user_id)?.name, createdTime: r.created_time, lastUsedTime: r.last_used_time,
-  oauth: !!r.oauth_client_id,
+  oauth: !!r.oauth_client_id, homeSpaceId: r.space_id,
+  workspaces: tokenSpaces(r.id, r.space_id, r.user_id).map((id) => ({ id, name: getRecord<SpaceRecord>('space', id)?.name || 'Untitled workspace' })),
 });
+
+/** Tokens that reach a workspace: made there, or added to it (SQL condition on mcp_tokens, one parameter). */
+const REACHES = '(space_id = ? OR id IN (SELECT token_id FROM mcp_token_spaces WHERE space_id = ?))';
+
+/** The workspaces a connection reaches (home first) that its person is still a member of. */
+export function tokenSpaces(tokenId: string, homeSpaceId: string, userId: string): string[] {
+  const linked = (db.prepare('SELECT space_id FROM mcp_token_spaces WHERE token_id = ? ORDER BY added_time').all(tokenId) as { space_id: string }[]).map((r) => r.space_id);
+  return [homeSpaceId, ...linked.filter((id) => id !== homeSpaceId)].filter((id) => isSpaceMember(getRecord<SpaceRecord>('space', id), userId));
+}
+
+/**
+ * Take a workspace away from the active connections matching `where` (SQL on mcp_tokens, with `params`): connections
+ * made there are revoked, connections added to it only lose that workspace. Returns how many connections changed.
+ */
+function cutOff(spaceId: string, where: string, params: (string | number)[]): number {
+  const now = Date.now();
+  const revoked = Number(db.prepare(`UPDATE mcp_tokens SET revoked_time = ? WHERE space_id = ? AND revoked_time IS NULL AND ${where}`).run(now, spaceId, ...params).changes ?? 0);
+  const unlinked = Number(db.prepare(`DELETE FROM mcp_token_spaces WHERE space_id = ? AND token_id IN (SELECT id FROM mcp_tokens WHERE revoked_time IS NULL AND ${where})`).run(spaceId, ...params).changes ?? 0);
+  return revoked + unlinked;
+}
 
 export function activeTokenCount(userId: string, spaceId: string): number {
   return (db.prepare('SELECT COUNT(*) AS n FROM mcp_tokens WHERE user_id = ? AND space_id = ? AND revoked_time IS NULL').get(userId, spaceId) as { n: number }).n;
@@ -115,22 +155,113 @@ export function listTokens(userId: string, spaceId: string, all = false): McpTok
   if (!isSpaceMember(space, userId)) throw new AiError('forbidden', 'You aren’t a member of this workspace.', 403);
   if (all && !isSpaceOwner(space, userId)) throw new AiError('forbidden', 'Only workspace owners can see every connection.', 403);
   const rows = all
-    ? db.prepare('SELECT * FROM mcp_tokens WHERE space_id = ? AND revoked_time IS NULL ORDER BY created_time DESC').all(spaceId)
-    : db.prepare('SELECT * FROM mcp_tokens WHERE space_id = ? AND user_id = ? AND revoked_time IS NULL ORDER BY created_time DESC').all(spaceId, userId);
+    ? db.prepare(`SELECT * FROM mcp_tokens WHERE ${REACHES} AND revoked_time IS NULL ORDER BY created_time DESC`).all(spaceId, spaceId)
+    : db.prepare(`SELECT * FROM mcp_tokens WHERE ${REACHES} AND user_id = ? AND revoked_time IS NULL ORDER BY created_time DESC`).all(spaceId, spaceId, userId);
   return (rows as unknown as TokenRow[]).map(info);
 }
 
-export function revokeToken(userId: string, tokenId: string) {
+/**
+ * Revoke a connection — its person or an owner of its home workspace. With `spaceId` (the workspace whose list it
+ * was revoked from) a connection made in another workspace only loses `spaceId` (its person or an owner there).
+ */
+export function revokeToken(userId: string, tokenId: string, spaceId?: string) {
   const r = db.prepare('SELECT * FROM mcp_tokens WHERE id = ?').get(String(tokenId)) as (TokenRow & { space_id: string }) | undefined;
   if (!r) throw new AiError('not_found', 'That token doesn’t exist.', 404);
+  if (spaceId && spaceId !== r.space_id && db.prepare('SELECT 1 FROM mcp_token_spaces WHERE token_id = ? AND space_id = ?').get(r.id, spaceId)) {
+    if (r.user_id !== userId && !isSpaceOwner(getRecord<SpaceRecord>('space', spaceId), userId)) throw new AiError('forbidden', 'You can’t revoke this token.', 403);
+    db.prepare('DELETE FROM mcp_token_spaces WHERE token_id = ? AND space_id = ?').run(r.id, spaceId);
+    return;
+  }
   if (r.user_id !== userId && !isSpaceOwner(getRecord<SpaceRecord>('space', r.space_id), userId)) throw new AiError('forbidden', 'You can’t revoke this token.', 403);
   db.prepare('UPDATE mcp_tokens SET revoked_time = ? WHERE id = ?').run(Date.now(), tokenId);
 }
 
-/** "Disconnect all users" (workspace owners): revokes every token of the workspace. */
+/** "Disconnect all users" (workspace owners): every connection loses the workspace. */
 export function revokeAll(userId: string, spaceId: string): number {
   if (!isSpaceOwner(getRecord<SpaceRecord>('space', spaceId), userId)) throw new AiError('forbidden', 'Only workspace owners can disconnect everyone.', 403);
-  return Number(db.prepare('UPDATE mcp_tokens SET revoked_time = ? WHERE space_id = ? AND revoked_time IS NULL').run(Date.now(), spaceId).changes ?? 0);
+  return cutOff(spaceId, '1 = 1', []);
+}
+
+/** Workspaces the person can connect: member, and Litpage MCP is on there (with `clientKey`: the client is allowed). */
+export function connectableSpaces(userId: string, clientKey?: string): SpaceRecord[] {
+  const root = getRecord<UserRootRecord>('user_root', userId);
+  const out: SpaceRecord[] = [];
+  for (const id of root?.space_views ?? []) {
+    const sv = getRecord<SpaceViewRecord>('space_view', id);
+    if (!sv || sv.alive === false || sv.parent_id !== userId) continue;
+    const s = getRecord<SpaceRecord>('space', sv.space_id);
+    if (s && isSpaceMember(s, userId) && workspaceAiPolicy(s.id).litMcp && (clientKey === undefined || clientAllowed(s.id, userId, clientKey)) && !out.some((o) => o.id === s.id)) out.push(s);
+  }
+  return out;
+}
+
+/** Why the connection's client can't reach `spaceId` (null = it can). */
+export function spaceProblem(spaceId: string, userId: string, clientKey: string): string | null {
+  if (!isSpaceMember(getRecord<SpaceRecord>('space', spaceId), userId)) return 'You aren’t a member of this workspace.';
+  if (!workspaceAiPolicy(spaceId).litMcp) return 'Litpage MCP is turned off for this workspace.';
+  if (!clientAllowed(spaceId, userId, clientKey)) return CLIENT_NOT_APPROVED;
+  return null;
+}
+
+/** Add workspaces to a connection (OAuth consent or Settings); skips the home and those already added. */
+export function linkSpaces(tokenId: string, spaceIds: string[]) {
+  const r = db.prepare('SELECT space_id, user_id, client_name FROM mcp_tokens WHERE id = ?').get(tokenId) as { space_id: string; user_id: string; client_name: string | null } | undefined;
+  if (!r) return;
+  const now = Date.now();
+  for (const id of spaceIds) {
+    if (id === r.space_id) continue;
+    if (db.prepare('INSERT OR IGNORE INTO mcp_token_spaces (token_id, space_id, added_time) VALUES (?, ?, ?)').run(tokenId, id, now).changes) {
+      audit('workspace_mcp_server_connected', { spaceId: id, actorId: r.user_id, targetId: tokenId, data: { client: r.client_name } });
+    }
+  }
+}
+
+export interface McpTokenWorkspace {
+  id: string;
+  name: string;
+  icon: string | null;
+  home: boolean;
+  /** the connection reaches it */
+  on: boolean;
+  /** why it can't be added (null = it can) */
+  problem: string | null;
+}
+
+function ownToken(userId: string, tokenId: string): TokenRow & { client_key: string | null } {
+  const r = db.prepare('SELECT * FROM mcp_tokens WHERE id = ? AND revoked_time IS NULL').get(String(tokenId)) as (TokenRow & { client_key: string | null }) | undefined;
+  if (!r || r.user_id !== userId) throw new AiError('not_found', 'That connection doesn’t exist.', 404);
+  return r;
+}
+
+/** Settings › Litpage MCP › Workspaces: the person's workspaces and whether this connection reaches them. */
+export function tokenWorkspaces(userId: string, tokenId: string): McpTokenWorkspace[] {
+  const r = ownToken(userId, tokenId);
+  const on = new Set(tokenSpaces(r.id, r.space_id, userId));
+  const root = getRecord<UserRootRecord>('user_root', userId);
+  const out: McpTokenWorkspace[] = [];
+  for (const id of root?.space_views ?? []) {
+    const sv = getRecord<SpaceViewRecord>('space_view', id);
+    if (!sv || sv.alive === false || sv.parent_id !== userId) continue;
+    const s = getRecord<SpaceRecord>('space', sv.space_id);
+    if (!s || !isSpaceMember(s, userId) || out.some((o) => o.id === s.id)) continue;
+    out.push({ id: s.id, name: s.name || 'Untitled workspace', icon: s.icon && s.icon.length <= 4 ? s.icon : null, home: s.id === r.space_id, on: on.has(s.id), problem: spaceProblem(s.id, userId, r.client_key ?? 'unknown') });
+  }
+  return out;
+}
+
+/** Choose the workspaces a connection reaches besides its home (its person only). */
+export function setTokenWorkspaces(userId: string, tokenId: string, spaceIds: string[]): McpTokenInfo {
+  const r = ownToken(userId, tokenId);
+  const want = [...new Set(spaceIds.map(String))].filter((id) => id !== r.space_id).slice(0, 50);
+  const have = (db.prepare('SELECT space_id FROM mcp_token_spaces WHERE token_id = ?').all(r.id) as { space_id: string }[]).map((x) => x.space_id);
+  const add = want.filter((id) => !have.includes(id));
+  for (const id of add) {
+    const problem = spaceProblem(id, userId, r.client_key ?? 'unknown');
+    if (problem) throw new AiError('forbidden', `${getRecord<SpaceRecord>('space', id)?.name || 'Workspace'}: ${problem}`, 403);
+  }
+  for (const id of have) if (!want.includes(id)) db.prepare('DELETE FROM mcp_token_spaces WHERE token_id = ? AND space_id = ?').run(r.id, id);
+  linkSpaces(r.id, add);
+  return info(db.prepare('SELECT * FROM mcp_tokens WHERE id = ?').get(r.id) as unknown as TokenRow);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -247,7 +378,7 @@ export function clientAllowed(spaceId: string, userId: string, key: string): boo
  * security boundary is the access token itself (its user's permissions, the workspace switch, revocation). An OAuth
  * grant is bound to the client the person authorized (its registered name, checked again at consent).
  */
-function clientBlocked(auth: McpAuth): string | null {
+function clientBlocked(auth: Pick<McpAuth, 'tokenId' | 'userId' | 'spaceId'>): string | null {
   return clientAllowed(auth.spaceId, auth.userId, tokenClient(auth.tokenId).key ?? 'unknown') ? null : CLIENT_NOT_APPROVED;
 }
 
@@ -280,7 +411,7 @@ function requireAdmin(userId: string, spaceId: string): SpaceRecord {
 export function listClients(userId: string, spaceId: string): { restricted: boolean; clients: McpClientRow[] } {
   const space = requireAdmin(userId, spaceId);
   const pol = clientPolicy(space);
-  const rows = db.prepare('SELECT * FROM mcp_tokens WHERE space_id = ? AND revoked_time IS NULL').all(spaceId) as unknown as (TokenRow & { client_key: string | null; client_name: string | null; first_connected_time: number | null })[];
+  const rows = db.prepare(`SELECT * FROM mcp_tokens WHERE ${REACHES} AND revoked_time IS NULL`).all(spaceId, spaceId) as unknown as (TokenRow & { client_key: string | null; client_name: string | null; first_connected_time: number | null })[];
   const byKey = new Map<string, McpClientRow>();
   const row = (key: string, reported: string | null): McpClientRow => {
     let r = byKey.get(key);
@@ -317,7 +448,7 @@ export function listClients(userId: string, spaceId: string): { restricted: bool
 /** View members: who connected a client, first connected / last used. */
 export function clientMembers(userId: string, spaceId: string, key: string) {
   requireAdmin(userId, spaceId);
-  const rows = db.prepare('SELECT * FROM mcp_tokens WHERE space_id = ? AND client_key = ? AND revoked_time IS NULL ORDER BY last_used_time DESC').all(spaceId, key) as unknown as (TokenRow & { first_connected_time: number | null })[];
+  const rows = db.prepare(`SELECT * FROM mcp_tokens WHERE ${REACHES} AND client_key = ? AND revoked_time IS NULL ORDER BY last_used_time DESC`).all(spaceId, spaceId, key) as unknown as (TokenRow & { first_connected_time: number | null })[];
   const byUser = new Map<string, { userId: string; name: string; email: string | null; firstConnected: number | null; lastUsed: number | null; tokens: number }>();
   for (const t of rows) {
     const u = getRecord<UserRecord>('lit_user', t.user_id);
@@ -333,10 +464,7 @@ export function clientMembers(userId: string, spaceId: string, key: string) {
 /** Disconnect one member (or everyone,  per client) from a client: their tokens for it are revoked. */
 export function disconnectClient(userId: string, spaceId: string, key: string, memberId?: string): number {
   requireAdmin(userId, spaceId);
-  const r = memberId
-    ? db.prepare('UPDATE mcp_tokens SET revoked_time = ? WHERE space_id = ? AND client_key = ? AND user_id = ? AND revoked_time IS NULL').run(Date.now(), spaceId, key, memberId)
-    : db.prepare('UPDATE mcp_tokens SET revoked_time = ? WHERE space_id = ? AND client_key = ? AND revoked_time IS NULL').run(Date.now(), spaceId, key);
-  return Number(r.changes ?? 0);
+  return memberId ? cutOff(spaceId, 'client_key = ? AND user_id = ?', [key, memberId]) : cutOff(spaceId, 'client_key = ?', [key]);
 }
 
 // Settings › MCP › Enabled clients › Disable: "{client} will no longer be able to access this workspace through
@@ -352,9 +480,7 @@ export function disableMyClient(userId: string, spaceId: string, client: { id?: 
   keys.delete('unknown');
   if (!keys.size) return 0;
   const list = [...keys].slice(0, 5);
-  const r = db.prepare(`UPDATE mcp_tokens SET revoked_time = ? WHERE space_id = ? AND user_id = ? AND revoked_time IS NULL AND client_key IN (${list.map(() => '?').join(', ')})`)
-    .run(Date.now(), spaceId, userId, ...list);
-  return Number(r.changes ?? 0);
+  return cutOff(spaceId, `user_id = ? AND client_key IN (${list.map(() => '?').join(', ')})`, [userId, ...list]);
 }
 
 /** "Approved MCP clients only" on/off. */
@@ -406,27 +532,68 @@ export function renameClient(userId: string, spaceId: string, key: string, name:
 interface McpAuth {
   tokenId: string;
   userId: string;
+  /** the workspace the connection was made in */
   spaceId: string;
+  /** every workspace it reaches, home first */
+  spaces: string[];
 }
 
 /** Why a personal access token (a MCP token) can't be used now, wherever it is used — /api/mcp or the public
  *  API: "Allow MCP" is off, or its client isn't approved (null = usable). */
-export function personalTokenBlocked(auth: McpAuth): string | null {
+export function personalTokenBlocked(auth: Pick<McpAuth, 'tokenId' | 'userId' | 'spaceId'>): string | null {
   if (isDemoMode()) return DEMO_MESSAGE;
   if (!workspaceAiPolicy(auth.spaceId).litMcp) return 'Litpage MCP is turned off for this workspace.';
   return clientBlocked(auth);
 }
 
 /** Bearer header → token (personal "lp_pat_…" or an unexpired OAuth "lp_oat_…" access token). */
-function tokenAuth(header: string | undefined): { tokenId: string; userId: string; spaceId: string } | null {
+function tokenAuth(header: string | undefined): McpAuth | null {
   const m = /^Bearer\s+(lp_(?:pat|oat)_[A-Za-z0-9_-]{20,})$/i.exec(header?.trim() ?? '');
   if (!m) return null;
   const r = db.prepare('SELECT * FROM mcp_tokens WHERE token_hash = ? AND revoked_time IS NULL').get(hash(m[1])) as TokenRow | undefined;
   if (!r || (r.expires_time != null && r.expires_time <= Date.now())) return null;
   if (!isSpaceMember(getRecord<SpaceRecord>('space', r.space_id), r.user_id)) return null;
   db.prepare('UPDATE mcp_tokens SET last_used_time = ? WHERE id = ?').run(Date.now(), r.id);
-  return { tokenId: r.id, userId: r.user_id, spaceId: r.space_id };
+  return { tokenId: r.id, userId: r.user_id, spaceId: r.space_id, spaces: tokenSpaces(r.id, r.space_id, r.user_id) };
 }
+
+/** Why calls of this connection can't work in `spaceId` (null = they can). */
+function callProblem(auth: McpAuth, spaceId: string): string | null {
+  if (!workspaceAiPolicy(spaceId).litMcp) return 'Litpage MCP is turned off for this workspace.';
+  return clientAllowed(spaceId, auth.userId, tokenClient(auth.tokenId).key ?? 'unknown') ? null : CLIENT_NOT_APPROVED;
+}
+
+/** The workspaces calls of this connection can work in now. */
+const usableSpaces = (auth: McpAuth) => auth.spaces.filter((id) => !callProblem(auth, id));
+
+const ID_RE = /[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}/gi;
+
+/** The workspace of the first page or database the arguments name (ids or Litpage URLs) that this connection reaches. */
+function spaceOfArgs(auth: McpAuth, args: Record<string, unknown>): string | null {
+  const values = Object.values(args).flatMap((v) => (Array.isArray(v) ? v : [v])).filter((v): v is string => typeof v === 'string').slice(0, 50);
+  for (const v of values) {
+    for (const m of v.match(ID_RE) ?? []) {
+      const id = expandId(m);
+      const space = getRecord<BlockRecord>('block', id)?.space_id ?? getRecord<any>('collection', id)?.space_id;
+      if (space && auth.spaces.includes(space)) return space;
+    }
+  }
+  return null;
+}
+
+/** The workspace a call works in: workspace_id (id or name), else the workspace of the page it names, else the home. */
+function callSpace(auth: McpAuth, args: Record<string, unknown>): { spaceId: string } | { error: string } {
+  const asked = typeof args.workspace_id === 'string' ? args.workspace_id.trim() : '';
+  if (asked) {
+    const want = asked.toLowerCase();
+    const hit = auth.spaces.find((id) => id === asked) ?? auth.spaces.find((id) => (getRecord<SpaceRecord>('space', id)?.name ?? '').trim().toLowerCase() === want);
+    if (!hit) return { error: `This connection can’t reach the workspace “${asked.slice(0, 80)}”. lit-get-self lists the workspaces it can reach; add more in Litpage under Settings → Litpage MCP.` };
+    return { spaceId: hit };
+  }
+  return { spaceId: spaceOfArgs(auth, args) ?? auth.spaceId };
+}
+
+const WORKSPACE_ARG = { type: 'string', description: 'The workspace to work in: its id or name from lit-get-self. Leave it out to use the workspace of the page or database you name, or else the connection’s main workspace.' };
 
 // ---------------------------------------------------------------------------------------------
 // Tools (MCP names → agent registry)
@@ -476,34 +643,47 @@ function schemaFor(t: McpToolDef): Record<string, unknown> {
   return { ...def.input_schema, properties: props, required };
 }
 
-export function mcpToolList(spaceId: string): Record<string, unknown>[] {
+/** The tools of a connection reaching `spaceIds`: memories and skills when any of them has them on. Every tool takes
+ *  an optional workspace_id, so workspaces added to the connection later work without reconnecting. */
+export function mcpToolList(spaceIds: string | string[]): Record<string, unknown>[] {
+  const ids = Array.isArray(spaceIds) ? spaceIds : [spaceIds];
+  const withWorkspace = (schema: Record<string, unknown>) => ({ ...schema, properties: { ...(schema.properties as Record<string, unknown> ?? {}), workspace_id: WORKSPACE_ARG } });
   const out: Record<string, unknown>[] = MCP_TOOLS.map((t) => ({
     name: t.name,
     title: t.title,
     description: TOOL_DEFS.find((d) => d.name === t.agent)!.description,
-    inputSchema: schemaFor(t),
+    inputSchema: withWorkspace(schemaFor(t)),
     annotations: { title: t.title, readOnlyHint: t.readOnly, destructiveHint: !!t.destructive, openWorldHint: false },
   }));
-  out.push({ name: 'lit-get-self', title: 'Get self', description: 'Get the user this connection acts as and the workspace.', inputSchema: { type: 'object', properties: {}, additionalProperties: false }, annotations: { readOnlyHint: true } });
+  const none = { type: 'object', properties: {}, additionalProperties: false };
+  out.push({ name: 'lit-get-self', title: 'Get self', description: 'Get the user this connection acts as, its main workspace and every workspace it can reach (pass one as workspace_id to the other tools).', inputSchema: none, annotations: { readOnlyHint: true } });
   // memory sync : the person's AI memories, shared with the agents they connect
-  if (workspaceAiPolicy(spaceId).memories) {
-    out.push({ name: 'lit-get-memories', title: 'Get memories', description: 'Get what the user asked Litpage AI to remember (their AI instructions page) so you can follow the same preferences.', inputSchema: { type: 'object', properties: {}, additionalProperties: false }, annotations: { readOnlyHint: true } });
-    out.push({ name: 'lit-save-memory', title: 'Save a memory', description: 'Save something the user wants remembered across Litpage AI and the agents they connect (appended to their AI instructions page). Use it when the user states a lasting preference or fact about themselves or their work.', inputSchema: { type: 'object', properties: { memory: { type: 'string', description: 'One short sentence to remember.' } }, required: ['memory'], additionalProperties: false }, annotations: { readOnlyHint: false, destructiveHint: false } });
+  if (ids.some((id) => workspaceAiPolicy(id).memories)) {
+    out.push({ name: 'lit-get-memories', title: 'Get memories', description: 'Get what the user asked Litpage AI to remember (their AI instructions page) so you can follow the same preferences.', inputSchema: withWorkspace(none), annotations: { readOnlyHint: true } });
+    out.push({ name: 'lit-save-memory', title: 'Save a memory', description: 'Save something the user wants remembered across Litpage AI and the agents they connect (appended to their AI instructions page). Use it when the user states a lasting preference or fact about themselves or their work.', inputSchema: withWorkspace({ type: 'object', properties: { memory: { type: 'string', description: 'One short sentence to remember.' } }, required: ['memory'], additionalProperties: false }), annotations: { readOnlyHint: false, destructiveHint: false } });
   }
-  if (workspaceAiPolicy(spaceId).mcpSkills) {
-    out.push({ name: 'lit-list-skills', title: 'List skills', description: 'List the skills enabled for the user in Litpage (name, id, description). Use a skill when a task matches its description.', inputSchema: { type: 'object', properties: {}, additionalProperties: false }, annotations: { readOnlyHint: true } });
-    out.push({ name: 'lit-get-skill', title: 'Get skill', description: 'Get the instructions of a skill by id.', inputSchema: { type: 'object', properties: { skill_id: { type: 'string' } }, required: ['skill_id'], additionalProperties: false }, annotations: { readOnlyHint: true } });
+  if (ids.some((id) => workspaceAiPolicy(id).mcpSkills)) {
+    out.push({ name: 'lit-list-skills', title: 'List skills', description: 'List the skills enabled for the user in Litpage (name, id, description). Use a skill when a task matches its description.', inputSchema: withWorkspace(none), annotations: { readOnlyHint: true } });
+    out.push({ name: 'lit-get-skill', title: 'Get skill', description: 'Get the instructions of a skill by id.', inputSchema: withWorkspace({ type: 'object', properties: { skill_id: { type: 'string' } }, required: ['skill_id'], additionalProperties: false }), annotations: { readOnlyHint: true } });
   }
   return out;
 }
 
-async function callTool(auth: { userId: string; spaceId: string }, name: string, args: Record<string, unknown>): Promise<{ content: { type: 'text'; text: string }[]; isError?: boolean }> {
+async function callTool(conn: McpAuth, name: string, rawArgs: Record<string, unknown>): Promise<{ content: { type: 'text'; text: string }[]; isError?: boolean }> {
   const text = (t: string, isError = false) => ({ content: [{ type: 'text' as const, text: t }], ...(isError ? { isError: true } : {}) });
   if (name === 'lit-get-self') {
-    const u = getRecord<UserRecord>('lit_user', auth.userId);
-    const s = getRecord<SpaceRecord>('space', auth.spaceId);
-    return text(JSON.stringify({ user: { id: u?.id, name: u?.name, email: u?.email }, workspace: { id: s?.id, name: s?.name } }, null, 2));
+    const u = getRecord<UserRecord>('lit_user', conn.userId);
+    const s = getRecord<SpaceRecord>('space', conn.spaceId);
+    const workspaces = usableSpaces(conn).map((id) => ({ id, name: getRecord<SpaceRecord>('space', id)?.name, main: id === conn.spaceId }));
+    return text(JSON.stringify({ user: { id: u?.id, name: u?.name, email: u?.email }, workspace: { id: s?.id, name: s?.name }, workspaces }, null, 2));
   }
+  const where = callSpace(conn, rawArgs);
+  if ('error' in where) return text(where.error, true);
+  const problem = callProblem(conn, where.spaceId);
+  if (problem) return text(`${getRecord<SpaceRecord>('space', where.spaceId)?.name || 'Workspace'}: ${problem}`, true);
+  const { workspace_id: _workspace, ...args } = rawArgs;
+  void _workspace;
+  const auth = { userId: conn.userId, spaceId: where.spaceId };
   if (name === 'lit-get-memories' || name === 'lit-save-memory') {
     if (!workspaceAiPolicy(auth.spaceId).memories) return text('Memories are turned off in this workspace.', true);
     const settings = (getRecord<UserSettingsRecord>('user_settings', auth.userId)?.settings ?? {}) as Record<string, unknown>;
@@ -591,19 +771,18 @@ async function handleMessage(auth: McpAuth, m: RpcMessage): Promise<Record<strin
         protocolVersion: MCP_PROTOCOL_VERSIONS.includes(requested) ? requested : MCP_PROTOCOL_VERSIONS[0],
         capabilities: { tools: { listChanged: false } },
         serverInfo: { name: 'Litpage MCP', version: '1.0.0' },
-        instructions: 'Tools act as the connected user in their Litpage workspace: search and fetch pages, create and update pages and databases, restore pages from Trash, and comment.',
+        instructions: 'Tools act as the connected user in their Litpage workspaces: search and fetch pages, create and update pages and databases, restore pages from Trash, and comment. A connection can reach more than one workspace: lit-get-self lists them, and workspace_id picks one (by default the workspace of the page you name, else the main workspace).',
       });
     }
     case 'ping':
       return ok({});
     case 'tools/list': {
-      const blocked = clientBlocked(auth);
-      if (blocked) return err(-32003, blocked);
-      return ok({ tools: mcpToolList(auth.spaceId) });
+      const usable = usableSpaces(auth);
+      if (!usable.length) return err(-32003, callProblem(auth, auth.spaceId) ?? CLIENT_NOT_APPROVED);
+      return ok({ tools: mcpToolList(usable) });
     }
     case 'tools/call': {
-      const blocked = clientBlocked(auth);
-      if (blocked) return err(-32003, blocked);
+      if (!usableSpaces(auth).length) return err(-32003, callProblem(auth, auth.spaceId) ?? CLIENT_NOT_APPROVED);
       const name = String(m.params?.name ?? '');
       const args = m.params?.arguments && typeof m.params.arguments === 'object' ? m.params.arguments : {};
       return ok(await callTool(auth, name, args));
@@ -634,7 +813,7 @@ export async function handleMcpHttp(authorization: string | undefined, body: unk
     const challenge = ['realm="Litpage MCP"', ...(resourceMetadata ? [`resource_metadata="${resourceMetadata}"`] : []), ...(authorization ? ['error="invalid_token"'] : [])].join(', ');
     return { status: 401, body: { jsonrpc: '2.0', id: null, error: { code: -32001, message: 'Unauthorized: sign in with OAuth or create an access token in Settings → Litpage MCP.' } }, headers: { 'www-authenticate': `Bearer ${challenge}` } };
   }
-  if (!workspaceAiPolicy(auth.spaceId).litMcp) return { status: 403, body: { jsonrpc: '2.0', id: null, error: { code: -32003, message: 'Litpage MCP is turned off for this workspace.' } } };
+  if (!auth.spaces.some((id) => workspaceAiPolicy(id).litMcp)) return { status: 403, body: { jsonrpc: '2.0', id: null, error: { code: -32003, message: 'Litpage MCP is turned off for this workspace.' } } };
   if (!hit(`mcp:token:${auth.tokenId}`, Number(process.env.NC_MCP_RATE_PER_MIN) || 180, 60_000)) {
     return { status: 429, body: { jsonrpc: '2.0', id: null, error: { code: -32029, message: 'There are too many requests right now. Try again shortly.' } } };
   }
