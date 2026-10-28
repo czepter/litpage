@@ -119,6 +119,16 @@ transactions.onSelectionRestore = (sel) => {
   useEditor.getState().requestFocus(sel.blockId, Math.min(sel.offset ?? len, len), { property: sel.property ?? 'title', end: sel.end !== undefined ? Math.min(sel.end, len) : undefined });
 };
 
+/** A block's box for the gutter; a block that reaches past its own box (a table breaking out into the page
+    margins) marks the element the handle should follow with data-gutter-anchor. */
+function gutterRect(el: HTMLElement): DOMRect {
+  const anchor = el.querySelector<HTMLElement>('[data-gutter-anchor]');
+  if (!anchor || anchor.closest('.lit-selectable[data-block-id]') !== el) return el.getBoundingClientRect();
+  const r = el.getBoundingClientRect();
+  const a = anchor.getBoundingClientRect();
+  return new DOMRect(a.left, r.top, a.width, r.height);
+}
+
 function leafOf(n: Node | null): HTMLElement | null {
   const el = n ? (n.nodeType === 1 ? (n as HTMLElement) : n.parentElement) : null;
   return (el?.closest('[data-content-editable-leaf="true"]') as HTMLElement | null) ?? null;
@@ -144,7 +154,7 @@ export function EditorSurface({ pageId, readOnly, children, scroller }: { pageId
     const els = blockEls(root);
     let best: HTMLElement | null = null;
     for (const el of els) {
-      const r = el.getBoundingClientRect();
+      const r = gutterRect(el);
       if (e.clientY >= r.top && e.clientY <= r.bottom && e.clientX >= r.left - GUTTER_LEFT && e.clientX <= r.right + GUTTER_RIGHT) {
         // deepest matching block wins
         if (!best || best.contains(el)) best = el;
@@ -159,7 +169,7 @@ export function EditorSurface({ pageId, readOnly, children, scroller }: { pageId
     }
     // pointer left of a block nested in a container that reserves that space (callout icon column, marked
     // data-gutter-host by the block module): target the container so the gutter doesn't cover its icon
-    if (e.clientX < best.getBoundingClientRect().left) {
+    if (e.clientX < gutterRect(best).left) {
       const host = best.parentElement?.closest('[data-gutter-host]')?.closest('.lit-selectable[data-block-id]') as HTMLElement | null | undefined;
       if (host) best = host;
     }
@@ -168,7 +178,7 @@ export function EditorSurface({ pageId, readOnly, children, scroller }: { pageId
     if (!b || b.type === 'column' || b.type === 'column_list' || b.type === 'table_row') return;
     const box = firstLineBox(best);
     const rr = root.getBoundingClientRect();
-    const r = best.getBoundingClientRect();
+    const r = gutterRect(best);
     setGutter({ blockId: id, top: box.top - rr.top, left: r.left - rr.left, height: box.height });
     useEditor.setState({ hoverBlock: id });
   }, [readOnly, marquee, blockSelecting]);

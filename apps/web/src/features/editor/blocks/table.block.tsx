@@ -1,6 +1,8 @@
 // Simple table (table > table_row). Cells have a 1px solid
 // var(--lp-border-primary), text padding 7px 9px, 14px/20px, tr height 34px; widths format.table_block_column_format
 // (new tables fill the column: 3 × 239.67px on a 720px page); table starts 14px right of the block edge.
+// Tables always fill the width they have: stored widths are scaled up proportionally when they add up to less,
+// and a top-level table breaks out of the text column, centred, into the page margins (BLEED_GUTTER from the frame edges).
 // Header row / column (format.table_block_column_header / table_block_row_header): var(--lp-table-header-bg),
 // weight 500. Hover: column grips 18×6 above each column, row grips 6×18 left of each row, "+" bars right
 // (16×H, add column) and below (W×16, add row) 8px away, "+" corner. Column menu: Color, Insert left/right,
@@ -30,6 +32,8 @@ import { colorToken } from '../../../lib/colorToken.ts';
 
 const DEFAULT_COL_WIDTH = 120;
 const MIN_COL_WIDTH = 32;
+/** space a broken-out table keeps to the page frame edges (room for the row grips and the block handle) */
+const BLEED_GUTTER = 80;
 
 interface CellSel {
   r0: number;
@@ -50,6 +54,53 @@ function colFormat(b: BlockRecord): ColFormat {
 
 function widthOf(b: BlockRecord, col: string): number {
   return colFormat(b)[col]?.width ?? DEFAULT_COL_WIDTH;
+}
+
+/** Content width a table can fill in its scroller (padding excluded, 1px for the collapsed border). */
+function availWidthOf(scroller: HTMLElement): number {
+  const cs = getComputedStyle(scroller);
+  return scroller.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - 1;
+}
+
+/** How far a top-level table reaches into each page margin: symmetric, never over the margin comments. */
+function useTableBleed(ref: React.RefObject<HTMLDivElement | null>, enabled: boolean): number {
+  const [bleed, setBleed] = useState(0);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    const frame = el?.closest('.nc-page-scroller') as HTMLElement | null;
+    if (!el || !enabled || !frame || el.closest('.layout.with-margin-comments')) {
+      setBleed(0);
+      return;
+    }
+    const compute = () => {
+      const fr = frame.getBoundingClientRect();
+      const r = el.getBoundingClientRect();
+      const left = r.left - fr.left;
+      const right = frame.clientWidth - (r.right - fr.left);
+      setBleed(Math.max(0, Math.floor(Math.min(left, right) - BLEED_GUTTER)));
+    };
+    compute();
+    const ro = new ResizeObserver(compute);
+    ro.observe(frame);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [enabled]);
+  return bleed;
+}
+
+/** Tracks the width the table can fill inside its scroller. */
+function useAvailWidth(ref: React.RefObject<HTMLDivElement | null>): number {
+  const [avail, setAvail] = useState(0);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const compute = () => setAvail(availWidthOf(el));
+    compute();
+    const ro = new ResizeObserver(compute);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return avail;
 }
 
 function liveRows(b: BlockRecord): BlockRecord[] {
@@ -252,7 +303,8 @@ export function fitTableToWidth(tableId: string) {
   const b = getBlock(tableId);
   if (!b) return;
   const order = colOrder(b);
-  const avail = containerWidthOf(tableId) - 1;
+  const scroller = document.querySelector<HTMLElement>(`.nc-table-scroller[data-table-id="${tableId}"]`);
+  const avail = scroller ? availWidthOf(scroller) : containerWidthOf(tableId) - 1;
   const total = order.reduce((s, c) => s + widthOf(b, c), 0) || 1;
   const fmt = { ...colFormat(b) };
   for (const c of order) fmt[c] = { ...(fmt[c] ?? {}), width: Math.max(MIN_COL_WIDTH, (widthOf(b, c) / total) * avail) };
@@ -485,7 +537,7 @@ interface Geo {
   h: number;
 }
 
-function TableBlock({ block, readOnly }: BlockProps) {
+function TableBlock({ block, depth, readOnly }: BlockProps) {
   const rowRecs = useRecords<BlockRecord>('block', block.content);
   const rows = rowRecs.filter((r): r is BlockRecord => !!r && r.alive && r.type === 'table_row');
   const cols = colOrder(block);
@@ -495,16 +547,24 @@ function TableBlock({ block, readOnly }: BlockProps) {
   const spans = spansOf(block, rows, cols);
   const tableRef = useRef<HTMLTableElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const bleed = useTableBleed(wrapRef, depth === 0);
+  const avail = useAvailWidth(scrollerRef);
   const [geo, setGeo] = useState<Geo | null>(null);
   const [hover, setHover] = useState<{ r: number; c: number } | null>(null);
   const [sel, setSel] = useState<CellSel | null>(null);
   const [highlight, setHighlight] = useState<CellSel | null>(null);
-  const [liveW, setLiveW] = useState<{ col: string; w: number } | null>(null);
+  // while a column is resized: the rendered widths of all columns
+  const [liveW, setLiveW] = useState<{ col: string; widths: Record<string, number> } | null>(null);
   const [dragInd, setDragInd] = useState<{ kind: 'row' | 'col'; pos: number } | null>(null);
   const selRef = useRef(sel);
   selRef.current = sel;
 
-  const width = (c: string) => (liveW && liveW.col === c ? liveW.w : fmt[c]?.width ?? DEFAULT_COL_WIDTH);
+  const stored = (c: string) => fmt[c]?.width ?? DEFAULT_COL_WIDTH;
+  const storedTotal = cols.reduce((s, c) => s + stored(c), 0);
+  const scale = avail > storedTotal && storedTotal > 0 ? avail / storedTotal : 1;
+  const width = (c: string) => liveW?.widths[c] ?? stored(c) * scale;
 
   // geometry for grips / handles / selection rectangles
   useLayoutEffect(() => {
@@ -537,7 +597,7 @@ function TableBlock({ block, readOnly }: BlockProps) {
     const ro = new ResizeObserver(measure);
     ro.observe(t);
     return () => ro.disconnect();
-  }, [rows.length, cols.join(','), liveW?.w, JSON.stringify(mergesOf(block))]);
+  }, [rows.length, cols.join(','), JSON.stringify(liveW?.widths), JSON.stringify(mergesOf(block))]);
 
   // cell-range keyboard & clipboard while a selection is active
   useEffect(() => {
@@ -681,20 +741,29 @@ function TableBlock({ block, readOnly }: BlockProps) {
     if (readOnly) return;
     e.preventDefault();
     e.stopPropagation();
-    const w0 = fmt[col]?.width ?? DEFAULT_COL_WIDTH;
+    // works on the rendered widths; a table that fills its width keeps doing so by trading with the next column
+    const start: Record<string, number> = {};
+    for (const c of cols) start[c] = width(c);
+    const next = scale > 1 ? cols[cols.indexOf(col) + 1] : undefined;
     const x0 = e.clientX;
-    let w = w0;
+    let widths = start;
     document.body.style.cursor = 'col-resize';
     const onMove = (ev: PointerEvent) => {
-      w = Math.max(MIN_COL_WIDTH, w0 + ev.clientX - x0);
-      setLiveW({ col, w });
+      let d = ev.clientX - x0;
+      d = Math.max(d, MIN_COL_WIDTH - start[col]);
+      if (next) d = Math.min(d, start[next] - MIN_COL_WIDTH);
+      widths = { ...start, [col]: start[col] + d, ...(next ? { [next]: start[next] - d } : {}) };
+      setLiveW({ col, widths });
     };
     const onUp = () => {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       document.body.style.cursor = '';
       setLiveW(null);
-      if (Math.abs(w - w0) > 0.5) run('table.resizeColumn', (tx) => setFormat(tx, block.id, { table_block_column_format: { ...colFormat(getBlock(block.id)!), [col]: { ...(colFormat(getBlock(block.id)!)[col] ?? {}), width: Math.round(w) } } }));
+      if (Math.abs(widths[col] - start[col]) <= 0.5) return;
+      const f = { ...colFormat(getBlock(block.id)!) };
+      for (const c of cols) f[c] = { ...(f[c] ?? {}), width: Math.round(widths[c]) };
+      run('table.resizeColumn', (tx) => setFormat(tx, block.id, { table_block_column_format: f }));
     };
     window.addEventListener('pointermove', onMove);
     window.addEventListener('pointerup', onUp);
@@ -818,8 +887,14 @@ function TableBlock({ block, readOnly }: BlockProps) {
   const inSel = (r: number, c: number) => !!sel && r >= Math.min(sel.r0, sel.r1) && r <= Math.max(sel.r0, sel.r1) && c >= Math.min(sel.c0, sel.c1) && c <= Math.max(sel.c0, sel.c1) && !(sel.r0 === sel.r1 && sel.c0 === sel.c1 && false);
 
   return (
-    <div className="nc-bpad0">
-      <div className="nc-table-scroller lit-scroller horizontal nc-blk-hoverable" data-table-id={block.id}>
+    <div className="nc-bpad0" ref={wrapRef}>
+      <div
+        ref={scrollerRef}
+        className="nc-table-scroller lit-scroller horizontal nc-blk-hoverable"
+        data-table-id={block.id}
+        data-gutter-anchor={bleed ? '' : undefined}
+        style={bleed ? { marginInlineStart: -bleed - 14, marginInlineEnd: -bleed - 30 } : undefined}
+      >
         <div className="nc-table-inner" ref={innerRef} onMouseLeave={() => setHover(null)}>
           <table className="nc-stable" ref={tableRef} style={{ width: cols.reduce((s, c) => s + width(c), 0) }}>
             <colgroup>{cols.map((c) => <col key={c} style={{ width: width(c) }} />)}</colgroup>

@@ -132,9 +132,11 @@ try {
     const b = await box(blk);
     const t = await box(blk.locator('table'));
     const td = await box(blk.locator('td').first());
-    expect('table: table x (rel)', t.x - b.x, 14);
-    expect('table: table w', t.w, 720);
-    expect('table: td w', td.w, 239.7, 1);
+    const f = await box(page.locator('.nc-page-scroller'));
+    // a top-level table breaks out of the column, centred on it, 80px from the frame edges; columns fill that width
+    expect('table: table x (frame rel)', t.x - f.x, 80);
+    expect('table: table centred on column', t.x + t.w / 2 - (b.x + b.w / 2), 0);
+    expect('table: td w', td.w, (f.w - 160) / 3, 1);
     expect('table: td h', td.h, 35, 1.5);
   }
   await page.keyboard.press('Escape');
