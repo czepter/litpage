@@ -12,7 +12,7 @@ import { redactVersionData } from '../../versionAccess.ts';
 import { lineDiff, versionBookmarks } from '../../versions.ts';
 import { AiError } from '../client.ts';
 import { blockTitle, canRead, mdSource, readPage, searchPages } from '../context.ts';
-import { databaseOf, isAncestor, normalizeId, PAGE_TYPES, readableBlock } from '../edit.ts';
+import { databaseOf, isAncestor, normalizeId, PAGE_TYPES, readableBlock, trashedAncestor } from '../edit.ts';
 import { childBlocks } from '../../tree.ts';
 import { MAX_PAGE_CHARS, pageContextText, pageToMarkdown, richTextToMarkdown, type MdSource } from '../prompts.ts';
 import { skillById } from '../skills.ts';
@@ -268,6 +268,60 @@ export const listPeople: ToolRun = async (env, input, stepId) => {
   return { content: people.map(({ u, role }) => `- ${u.name || u.email} (user_id: ${u.id}${u.email ? `, ${u.email}` : ''}${u.id === env.userId ? ', this is the user' : ''}, ${role})`).join('\n') };
 };
 
+/** Where a block was: the pages, databases and teamspace above it, outermost first. */
+function locationPath(b: BlockRecord): string {
+  const crumbs: string[] = [];
+  let cur: BlockRecord | undefined = b;
+  for (let i = 0; i < 40 && cur; i++) {
+    if (cur.parent_table === 'block') {
+      cur = getRecord<BlockRecord>('block', cur.parent_id);
+      if (cur && (PAGE_TYPES.has(cur.type) || cur.type === 'collection_view')) crumbs.unshift(blockTitle(cur) || 'Untitled');
+    } else if (cur.parent_table === 'collection') {
+      const c = getRecord<CollectionRecord>('collection', cur.parent_id);
+      cur = c ? getRecord<BlockRecord>('block', c.parent_id) : undefined;
+      if (cur) crumbs.unshift(blockTitle(cur) || 'Untitled');
+    } else if (cur.parent_table === 'team') {
+      crumbs.unshift(`Teamspace ${getRecord<TeamRecord>('team', cur.parent_id)?.name ?? ''}`.trim());
+      break;
+    } else {
+      const isPrivate = (cur.permissions ?? []).some((p) => p.type === 'user_permission') && !(cur.permissions ?? []).some((p) => p.type === 'space_permission');
+      crumbs.unshift(isPrivate ? 'Private' : 'Workspace');
+      break;
+    }
+  }
+  return crumbs.join(' / ');
+}
+
+export const listTrash: ToolRun = async (env, input, stepId) => {
+  env.step({ id: stepId, tool: 'list_trash', status: 'running', label: 'Viewing', detail: 'Trash' });
+  const q = String(input.query ?? '').trim().toLowerCase();
+  const limit = Math.min(200, Math.max(1, Number(input.limit) || 50));
+  const rows = db.prepare(`SELECT data FROM records WHERE tbl = 'block' AND space_id = ? AND alive = 0
+                           AND json_extract(data, '$.type') IN ('page', 'collection_view_page', 'collection_view')
+                           ORDER BY last_edited_time DESC LIMIT 5000`).all(env.spaceId) as { data: string }[];
+  const items: { b: BlockRecord; title: string }[] = [];
+  for (const r of rows) {
+    const b = JSON.parse(r.data) as BlockRecord;
+    // only the top-most deleted item: what is inside it comes back with it
+    if (trashedAncestor(b) || blockRole(b.id, env.userId) === 'none') continue;
+    const title = blockTitle(b) || 'Untitled';
+    if (q && !title.toLowerCase().includes(q)) continue;
+    items.push({ b, title });
+  }
+  items.sort((x, y) => (Number(y.b.deleted_time) || 0) - (Number(x.b.deleted_time) || 0));
+  const shown = items.slice(0, limit);
+  env.step({ id: stepId, tool: 'list_trash', status: 'done', label: 'Viewed', detail: `Trash (${shown.length})` });
+  if (!shown.length) return { content: q ? 'Nothing in Trash matches.' : 'Trash is empty.' };
+  const kind = (b: BlockRecord) => (b.type === 'collection_view' ? 'inline database' : b.type === 'collection_view_page' ? 'database' : b.parent_table === 'collection' ? 'database row' : 'page');
+  const lines = shown.map(({ b, title }) => {
+    const who = b.deleted_by_id ? getRecord<UserRecord>('lit_user', String(b.deleted_by_id)) : undefined;
+    const when = b.deleted_time ? new Date(Number(b.deleted_time)).toISOString() : 'unknown time';
+    return `- “${title}” (${kind(b)}, page_id: ${b.id}) in ${locationPath(b) || 'Workspace'}; deleted ${when}${who ? ` by ${who.name || who.email}` : ''}`;
+  });
+  const more = items.length > shown.length ? `\n…and ${items.length - shown.length} more (raise limit or narrow with query).` : '';
+  return { content: `In Trash (newest first):\n${lines.join('\n')}${more}\n\nRestore with restore_pages.` };
+};
+
 export function notificationsOf(userId: string, spaceId: string): NotificationRecord[] {
   return (db.prepare(`SELECT data FROM records WHERE tbl = 'notification' AND json_extract(data, '$.user_id') = ?`).all(userId) as { data: string }[])
     .map((r) => JSON.parse(r.data) as NotificationRecord)
@@ -309,6 +363,7 @@ export const READ_TOOL_RUNS: Record<string, ToolRun> = {
   read_comments: readComments,
   view_version_history: viewVersionHistory,
   list_people: listPeople,
+  list_trash: listTrash,
   list_notifications: listNotifications,
   use_skill: useSkill,
 };

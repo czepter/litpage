@@ -496,6 +496,55 @@ export function deleteOps(blocks: BlockRecord[], userId: string): Operation[] {
   return ops;
 }
 
+/** A block in Trash the user may restore (edit access, as for deleting it). */
+export function trashedBlock(id: string, userId: string): BlockRecord {
+  const b = getRecord<BlockRecord>('block', normalizeId(id));
+  if (!b || !inScope(b.space_id) || blockRole(b.id, userId) === 'none') throw new AiError('not_found', 'That page doesn’t exist or the user can’t access it.', 404);
+  if (b.alive !== false) throw new AiError('bad_request', `“${blockTitle(b) || 'Untitled'}” isn’t in Trash.`, 400);
+  const ok = b.parent_table === 'collection' ? canEditRow(b.id, userId) : canEdit(b.id, userId);
+  if (!ok) throw new AiError('forbidden', `The user can only view “${blockTitle(b) || 'Untitled'}”, so it can’t be restored.`, 403);
+  return b;
+}
+
+/** The nearest ancestor (through blocks and databases) that is in Trash itself. */
+export function trashedAncestor(b: BlockRecord): BlockRecord | undefined {
+  let cur: BlockRecord | undefined = b;
+  for (let i = 0; i < 200 && cur; i++) {
+    if (cur.parent_table === 'block') cur = getRecord<BlockRecord>('block', cur.parent_id);
+    else if (cur.parent_table === 'collection') {
+      const c = getRecord<CollectionRecord>('collection', cur.parent_id);
+      cur = c ? getRecord<BlockRecord>('block', c.parent_id) : undefined;
+    } else return undefined;
+    if (cur?.alive === false) return cur;
+  }
+  return undefined;
+}
+
+/** Ops that bring blocks back from Trash to where they were listed (the inverse of deleteOps). */
+export function restoreOps(blocks: BlockRecord[], userId: string): Operation[] {
+  const ops: Operation[] = [];
+  for (const b of blocks) {
+    ops.push(mk.update({ table: 'block', id: b.id, spaceId: b.space_id }, [], { alive: true, deleted_time: undefined, deleted_by_id: undefined }));
+    if (b.parent_table === 'block') {
+      const parent = getRecord<BlockRecord>('block', b.parent_id);
+      if (!(parent?.content ?? []).includes(b.id)) ops.push(mk.listAfter({ table: 'block', id: b.parent_id, spaceId: b.space_id }, ['content'], b.id));
+    } else if (b.parent_table === 'team') {
+      const team = getRecord<TeamRecord>('team', b.parent_id);
+      if (!(team?.team_pages ?? []).includes(b.id)) ops.push(mk.listAfter({ table: 'team', id: b.parent_id, spaceId: b.space_id }, ['team_pages'], b.id));
+    } else if (b.parent_table === 'space') {
+      // a private page goes back to its owner's Private pages, a workspace page to the Workspace section
+      const owner = (b.permissions ?? []).find((p) => p.type === 'user_permission' && p.user_id)?.user_id;
+      const isPrivate = !!owner && !(b.permissions ?? []).some((p) => p.type === 'space_permission');
+      const sv = isPrivate ? spaceViewOf(owner!, b.parent_id) ?? spaceViewOf(userId, b.parent_id) : undefined;
+      const space = getRecord<SpaceRecord>('space', b.parent_id);
+      if (sv) {
+        if (!(sv.private_pages ?? []).includes(b.id)) ops.push(mk.listBefore({ table: 'space_view', id: sv.id, spaceId: b.space_id }, ['private_pages'], b.id));
+      } else if (!(space?.pages ?? []).includes(b.id)) ops.push(mk.listAfter({ table: 'space', id: b.parent_id, spaceId: b.space_id }, ['pages'], b.id));
+    }
+  }
+  return ops;
+}
+
 // ---------------------------------------------------------------------------------------------
 // Parents
 

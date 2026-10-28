@@ -20,7 +20,7 @@ import { blockTitle } from '../context.ts';
 import {
   addViewOps, canComment, canEdit, canEditRow, canEditStructure, countBlocks, databaseOf, databaseSpec, deleteOps, editableBlock, encodeValues, inlineRichText, SPECIAL_VIEW_TYPES, specialViewOps, type AgentViewInput,
   formulaPatch, insertSpecs, replaceTextOps, type TextEdit, isAncestor, markdownToSpecs, matchSelection, moveOps, normalizeId, pageUnits, placeUnder, readableBlock, resolveParent, resolvePeople,
-  spaceViewOf, textRange, viewsOf, type Parent, type PropertyInput,
+  restoreOps, spaceViewOf, textRange, trashedAncestor, trashedBlock, viewsOf, type Parent, type PropertyInput,
 } from '../edit.ts';
 import { filterRows, notificationsOf, type RowFilter } from './read.ts';
 import { aiQueryContext, discussionVisible, visibleCollection, visibleRows } from '../visibility.ts';
@@ -581,6 +581,31 @@ export const deletePages: ToolRun = async (env, input, stepId) => {
   });
 };
 
+export const restorePages: ToolRun = async (env, input, stepId) => {
+  const ids = [...new Set((input.page_ids as string[]).map(normalizeId))];
+  const blocks = ids.map((id) => trashedBlock(id, env.userId));
+  for (const b of blocks) {
+    const anc = trashedAncestor(b);
+    if (anc && !ids.includes(anc.id)) {
+      throw new AiError('bad_request', `“${blockTitle(b) || 'Untitled'}” is inside “${blockTitle(anc) || 'Untitled'}” (page_id: ${anc.id}), which is in Trash too. Restore that one as well (it brings back what is inside it).`, 400);
+    }
+  }
+  const list = blocks.map((b) => ({ pageId: b.id, title: blockTitle(b) || 'Untitled', action: 'restored' as const, database: isDatabase(b) }));
+  const n = list.length;
+  return execute(env, stepId, {
+    tool: 'restore_pages',
+    ops: restoreOps(blocks, env.userId),
+    pages: list,
+    risk: 'edit',
+    approval: { title: n === 1 ? `Restore “${list[0].title}” from Trash?` : `Restore ${n} pages from Trash?`, pages: list.map((p) => ({ title: p.title })), confirmLabel: 'Restore' },
+    running: 'Restoring from Trash',
+    done: plural(n, 'Restored 1 page', 'Restored {n} pages'),
+    declined: plural(n, 'Restore page', 'Restore {n} pages'),
+    detail: n === 1 ? list[0].title : undefined,
+    result: () => `Restored from Trash: ${list.map((p) => `“${p.title}” (page_id: ${p.pageId})`).join(', ')}.`,
+  });
+};
+
 /** private:<user> / team:<id> / space — moving between scopes changes who can see a page. */
 function scopeOf(blockId: string): string {
   let cur = getRecord<BlockRecord>('block', blockId);
@@ -1036,6 +1061,7 @@ export const WRITE_TOOL_RUNS: Record<string, ToolRun> = {
   update_rows: updateRows,
   manage_versions: manageVersions,
   delete_pages: deletePages,
+  restore_pages: restorePages,
   move_pages: movePages,
   create_database: createDatabase,
   update_database: updateDatabase,

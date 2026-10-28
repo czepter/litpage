@@ -166,6 +166,19 @@ export const TOOL_DEFS: ToolDef[] = [
     },
   },
   {
+    name: 'list_trash',
+    access: 'read',
+    description: 'List what is in Trash: deleted pages, databases (full page and inline) and database rows — with page_id, where each one was and when it was deleted, newest first. Only the top-most deleted item of a deleted subtree is listed (what is inside it comes back with it). Restore items with restore_pages.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        query: str('Part of the title.'),
+        limit: { type: 'number', description: 'Most items to return (default 50, max 200).' },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'list_people',
     access: 'read',
     description: 'List the people in the workspace (name and user id), optionally filtered by name. Use it to resolve @mentions, person properties and comment mentions.',
@@ -289,6 +302,12 @@ export const TOOL_DEFS: ToolDef[] = [
     name: 'delete_pages',
     access: 'write',
     description: 'Move pages (or database rows / databases) to Trash. Only when the user explicitly asks to delete something.',
+    input_schema: { type: 'object', properties: { page_ids: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 50 } }, required: ['page_ids'], additionalProperties: false },
+  },
+  {
+    name: 'restore_pages',
+    access: 'write',
+    description: 'Restore pages, databases or database rows from Trash to where they were (ids from list_trash). Sub-pages and the rows of a database come back with it. When the original parent is still in Trash, restore that parent too (in the same call) or restore it first.',
     input_schema: { type: 'object', properties: { page_ids: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 50 } }, required: ['page_ids'], additionalProperties: false },
   },
   {

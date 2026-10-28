@@ -454,6 +454,8 @@ const MCP_TOOLS: McpToolDef[] = [
   { name: 'lit-update-rows', title: 'Update database rows', agent: 'update_rows', readOnly: false },
   { name: 'lit-manage-versions', title: 'Save or restore a version', agent: 'manage_versions', readOnly: false, destructive: true },
   { name: 'lit-move-pages', title: 'Move pages', agent: 'move_pages', readOnly: false },
+  { name: 'lit-list-trash', title: 'List Trash', agent: 'list_trash', readOnly: true },
+  { name: 'lit-restore-pages', title: 'Restore from Trash', agent: 'restore_pages', readOnly: false },
   { name: 'lit-create-database', title: 'Add a database', agent: 'create_database', readOnly: false },
   { name: 'lit-update-database', title: 'Update a database', agent: 'update_database', readOnly: false },
   { name: 'lit-create-comment', title: 'Create a comment', agent: 'add_comment', readOnly: false },
@@ -588,7 +590,7 @@ async function handleMessage(auth: McpAuth, m: RpcMessage): Promise<Record<strin
         protocolVersion: MCP_PROTOCOL_VERSIONS.includes(requested) ? requested : MCP_PROTOCOL_VERSIONS[0],
         capabilities: { tools: { listChanged: false } },
         serverInfo: { name: 'Litpage MCP', version: '1.0.0' },
-        instructions: 'Tools act as the connected user in their Litpage workspace: search and fetch pages, create and update pages and databases, and comment.',
+        instructions: 'Tools act as the connected user in their Litpage workspace: search and fetch pages, create and update pages and databases, restore pages from Trash, and comment.',
       });
     }
     case 'ping':
