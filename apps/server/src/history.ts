@@ -126,11 +126,14 @@ function notePending(pageId: string, userId: string, now: number) {
   if (now - last >= SNAPSHOT_INTERVAL_MS) takeSnapshot(pageId, [...p.authors], now);
 }
 
-export function takeSnapshot(pageId: string, authors: string[], now = Date.now()) {
+/** Save the page as a version now; returns the version id. */
+export function takeSnapshot(pageId: string, authors: string[], now = Date.now()): string | undefined {
   const page = getRecord<BlockRecord>('block', pageId);
-  if (!page) return;
-  insertSnap.run(newId(), pageId, page.space_id, now, JSON.stringify(authors), JSON.stringify(serializePage(pageId)));
+  if (!page) return undefined;
+  const id = newId();
+  insertSnap.run(id, pageId, page.space_id, now, JSON.stringify(authors), JSON.stringify(serializePage(pageId)));
   pendingPages.delete(pageId);
+  return id;
 }
 
 export function listSnapshots(pageId: string, limit = 100) {

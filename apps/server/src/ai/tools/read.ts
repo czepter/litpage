@@ -9,6 +9,7 @@ import { blockRole } from '../../records.ts';
 import { aiQueryContext, discussionVisible, visibleRows } from '../visibility.ts';
 import { getSnapshot, listSnapshots } from '../../history.ts';
 import { redactVersionData } from '../../versionAccess.ts';
+import { lineDiff, versionBookmarks } from '../../versions.ts';
 import { AiError } from '../client.ts';
 import { blockTitle, canRead, mdSource, readPage, searchPages } from '../context.ts';
 import { databaseOf, isAncestor, normalizeId, PAGE_TYPES, readableBlock } from '../edit.ts';
@@ -90,19 +91,20 @@ function cell(v: string): string {
   return v.replace(/\|/g, '\\|').replace(/\n+/g, ' ').trim();
 }
 
-export const queryDatabase: ToolRun = async (env, input, stepId) => {
-  // the person's view of the data source (a linked view of one they can't open is "not found"); only rows and property
-  // values they may see (row access, property access) — formulas / rollups are computed from the redacted rows
-  const { col, block } = databaseOf(String(input.database_id), env.userId);
-  const name = toPlainText(col.name) || 'Untitled database';
-  env.step({ id: stepId, tool: 'query_database', status: 'running', label: 'Viewing', detail: name });
-  const ctx = aiQueryContext(env.userId);
+export interface RowFilter {
+  property: string;
+  operator: string;
+  value?: string;
+}
+
+/** Rows matching every filter (query_database / update_rows), or an error message for an unknown property. */
+export function filterRows(col: CollectionRecord, rows: BlockRecord[], filters: RowFilter[] | undefined, userId: string): BlockRecord[] | string {
+  const ctx = aiQueryContext(userId);
   const schema = col.schema;
   const pidOf = (nm: string) => Object.keys(schema).find((k) => schema[k].name.toLowerCase() === nm.trim().toLowerCase() || k === nm);
-  let rows = visibleRows(col.id, env.userId);
-  for (const f of (input.filters ?? []) as { property: string; operator: string; value?: string }[]) {
+  for (const f of filters ?? []) {
     const pid = pidOf(f.property);
-    if (!pid) return { content: `Unknown property “${f.property}”. Properties: ${schemaLine(col)}`, isError: true };
+    if (!pid) return `Unknown property “${f.property}”. Properties: ${schemaLine(col)}`;
     const want = (f.value ?? '').trim().toLowerCase();
     rows = rows.filter((r) => {
       const v = getPropertyValue(r, pid, schema, ctx);
@@ -125,6 +127,21 @@ export const queryDatabase: ToolRun = async (env, input, stepId) => {
       }
     });
   }
+  return rows;
+}
+
+export const queryDatabase: ToolRun = async (env, input, stepId) => {
+  // the person's view of the data source (a linked view of one they can't open is "not found"); only rows and property
+  // values they may see (row access, property access) — formulas / rollups are computed from the redacted rows
+  const { col, block } = databaseOf(String(input.database_id), env.userId);
+  const name = toPlainText(col.name) || 'Untitled database';
+  env.step({ id: stepId, tool: 'query_database', status: 'running', label: 'Viewing', detail: name });
+  const ctx = aiQueryContext(env.userId);
+  const schema = col.schema;
+  const pidOf = (nm: string) => Object.keys(schema).find((k) => schema[k].name.toLowerCase() === nm.trim().toLowerCase() || k === nm);
+  const filtered = filterRows(col, visibleRows(col.id, env.userId), input.filters, env.userId);
+  if (typeof filtered === 'string') return { content: filtered, isError: true };
+  let rows = filtered;
   if (input.sort?.property) {
     const pid = pidOf(String(input.sort.property));
     if (pid) {
@@ -192,30 +209,49 @@ export const readComments: ToolRun = async (env, input, stepId) => {
   return { content: parts.length ? `Comments on “${title}” (page_id: ${page.id}):\n\n${parts.join('\n\n')}` : `“${title}” has no ${input.include_resolved ? '' : 'open '}comments.` };
 };
 
+/** A stored version of `page` as Markdown, the way the preview shows it to `userId` (versionAccess.ts): rows, values,
+ *  "No access" properties and restricted sub-pages hidden from them today stay out. */
+function versionMarkdown(page: BlockRecord, data: unknown, userId: string): string {
+  const red = redactVersionData(page.id, (data ?? {}) as { blocks?: unknown; databases?: unknown }, userId);
+  const blocks = new Map<string, BlockRecord>(((red.blocks ?? []) as BlockRecord[]).map((b) => [b.id, b] as [string, BlockRecord]));
+  const live = mdSource(userId);
+  const src: MdSource = { ...live, block: (id) => (blocks.get(id) as any) ?? undefined, pageTitle: (id) => (blocks.has(id) ? blockTitle(blocks.get(id)) : live.pageTitle(id)) };
+  return pageToMarkdown(page.id, src, { maxChars: MAX_PAGE_CHARS }).markdown;
+}
+
 export const viewVersionHistory: ToolRun = async (env, input, stepId) => {
   const page = readableBlock(String(input.page_id), env.userId);
   const title = blockTitle(page) || 'Untitled';
   // like Version history: Can edit or more — old versions hold deleted text
   if (!roleAtLeast(blockRole(page.id, env.userId), 'read_and_write')) throw new AiError('forbidden', `The user can’t see the version history of “${title}”: it needs edit access to the page.`, 403);
   env.step({ id: stepId, tool: 'view_version_history', status: 'running', label: 'Opening version history', detail: title });
+  const done = () => env.step({ id: stepId, tool: 'view_version_history', status: 'done', label: 'Checked version history', detail: title, refs: [{ pageId: page.id, title }] });
+  const names = versionBookmarks(page.id, env.userId);
+  const label = (v: { id: string; createdTime: number; authorIds: string[] }) => `${names[v.id] ? `“${names[v.id]}”, ` : ''}saved ${iso(v.createdTime)} by ${(v.authorIds ?? []).map(userName).join(', ') || 'Unknown'}`;
   if (input.version_id) {
     const snap = getSnapshot(String(input.version_id));
     if (!snap || snap.pageId !== page.id) return { content: 'That version doesn’t exist for this page.', isError: true };
-    // the version as the preview shows it to this person (versionAccess.ts): rows, values, "No access" properties
-    // and restricted sub-pages hidden from them today stay out
-    const data = redactVersionData(page.id, snap.data ?? {}, env.userId);
-    const blocks = new Map<string, BlockRecord>(((data.blocks ?? []) as BlockRecord[]).map((b) => [b.id, b] as [string, BlockRecord]));
-    const live = mdSource(env.userId);
-    const src: MdSource = { ...live, block: (id) => (blocks.get(id) as any) ?? undefined, pageTitle: (id) => (blocks.has(id) ? blockTitle(blocks.get(id)) : live.pageTitle(id)) };
-    const md = pageToMarkdown(page.id, src, { maxChars: MAX_PAGE_CHARS });
-    env.step({ id: stepId, tool: 'view_version_history', status: 'done', label: 'Checked version history', detail: title, refs: [{ pageId: page.id, title }] });
-    return { content: `Version ${snap.id} of “${title}” saved ${iso(snap.createdTime)} by ${snap.authorIds.map(userName).join(', ') || 'Unknown'}:\n\n${md.markdown}` };
+    const md = versionMarkdown(page, snap.data, env.userId);
+    if (input.compare_with) {
+      const other = String(input.compare_with) === 'current' ? null : getSnapshot(String(input.compare_with));
+      if (String(input.compare_with) !== 'current' && (!other || other.pageId !== page.id)) return { content: 'The version to compare with doesn’t exist for this page.', isError: true };
+      // older → newer, so "+" lines are what was added since
+      const otherMd = other ? versionMarkdown(page, other.data, env.userId) : pageToMarkdown(page.id, mdSource(env.userId), { maxChars: MAX_PAGE_CHARS }).markdown;
+      const [from, to] = other && other.createdTime < snap.createdTime ? [otherMd, md] : [md, otherMd];
+      const fromLabel = other && other.createdTime < snap.createdTime ? `version ${other.id}` : `version ${snap.id}`;
+      const toLabel = !other ? 'the current page' : other.createdTime < snap.createdTime ? `version ${snap.id}` : `version ${other.id}`;
+      const diff = lineDiff(from, to);
+      done();
+      return { content: diff ? `Changes in “${title}” from ${fromLabel} to ${toLabel} (“- ” removed, “+ ” added, “…” unchanged lines left out):\n\n${diff}` : `“${title}” is the same in ${fromLabel} and ${toLabel}.` };
+    }
+    done();
+    return { content: `Version ${snap.id} of “${title}”, ${label(snap)}:\n\n${md}` };
   }
   const versions = listSnapshots(page.id, 30) as { id: string; createdTime: number; authorIds: string[] }[];
-  env.step({ id: stepId, tool: 'view_version_history', status: 'done', label: 'Checked version history', detail: title, refs: [{ pageId: page.id, title }] });
+  done();
   if (!versions.length) return { content: `“${title}” has no saved versions yet.` };
   return {
-    content: `Versions of “${title}” (newest first):\n${versions.map((v) => `- version_id ${v.id}: ${iso(v.createdTime)} by ${(v.authorIds ?? []).map(userName).join(', ') || 'Unknown'}`).join('\n')}\n\nCall again with version_id to read one.`,
+    content: `Versions of “${title}” (newest first):\n${versions.map((v) => `- version_id ${v.id}: ${label(v)}`).join('\n')}\n\nCall again with version_id to read one, add compare_with ("current" or another version_id) to see what changed, or restore one with manage_versions.`,
   };
 };
 

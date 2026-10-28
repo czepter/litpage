@@ -436,6 +436,8 @@ interface McpToolDef {
   title: string;
   agent: string;
   readOnly: boolean;
+  /** may overwrite content in a way the client should confirm (restoring a version) */
+  destructive?: boolean;
   /** rename MCP argument names to the agent tool's */
   args?: Record<string, string>;
 }
@@ -446,8 +448,11 @@ const MCP_TOOLS: McpToolDef[] = [
   { name: 'lit-query-database', title: 'Query a database', agent: 'query_database', readOnly: true },
   { name: 'lit-get-comments', title: 'Get comments', agent: 'read_comments', readOnly: true },
   { name: 'lit-get-users', title: 'Get users', agent: 'list_people', readOnly: true },
+  { name: 'lit-get-versions', title: 'Get page versions', agent: 'view_version_history', readOnly: true },
   { name: 'lit-create-pages', title: 'Create pages', agent: 'create_pages', readOnly: false },
   { name: 'lit-update-page', title: 'Update a page', agent: 'update_page', readOnly: false },
+  { name: 'lit-update-rows', title: 'Update database rows', agent: 'update_rows', readOnly: false },
+  { name: 'lit-manage-versions', title: 'Save or restore a version', agent: 'manage_versions', readOnly: false, destructive: true },
   { name: 'lit-move-pages', title: 'Move pages', agent: 'move_pages', readOnly: false },
   { name: 'lit-create-database', title: 'Add a database', agent: 'create_database', readOnly: false },
   { name: 'lit-update-database', title: 'Update a database', agent: 'update_database', readOnly: false },
@@ -474,7 +479,7 @@ export function mcpToolList(spaceId: string): Record<string, unknown>[] {
     title: t.title,
     description: TOOL_DEFS.find((d) => d.name === t.agent)!.description,
     inputSchema: schemaFor(t),
-    annotations: { title: t.title, readOnlyHint: t.readOnly, destructiveHint: false, openWorldHint: false },
+    annotations: { title: t.title, readOnlyHint: t.readOnly, destructiveHint: !!t.destructive, openWorldHint: false },
   }));
   out.push({ name: 'lit-get-self', title: 'Get self', description: 'Get the user this connection acts as and the workspace.', inputSchema: { type: 'object', properties: {}, additionalProperties: false }, annotations: { readOnlyHint: true } });
   // memory sync : the person's AI memories, shared with the agents they connect

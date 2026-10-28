@@ -226,6 +226,15 @@ only talk to local mock servers.
   `/.well-known/`, dynamic client registration, PKCE), so you sign in, pick a workspace and allow access. Other clients
   use a personal access token from Settings → Litpage MCP. OAuth uses the address the client connected to; behind a
   reverse proxy set `NC_TRUST_PROXY=1` so it sees the public scheme and host.
+  Edits can be partial (replace a phrase inside a block, insert after a passage, replace a range) or cover many database
+  rows at once (`lit-update-rows`). Every edit from AI chat, agents or MCP saves the page's previous state as a version
+  first; `lit-get-versions` lists and compares versions and `lit-manage-versions` names or restores one.
+- **Partial page edits over REST**: `PATCH /v1/pages/{id}/markdown` changes part of a page instead of all of it.
+  `update_content` replaces text in place (`content_updates: [{ "old_str": "Friday", "new_str": "Monday" }]`, all or
+  nothing; blocks, comments and formatting stay; quote plain text, or inline Markdown as the page's Markdown shows it,
+  e.g. `"old_str": "**Friday**", "new_str": "*Monday*"`), `insert_content` adds Markdown after a block id or after quoted text
+  (`"after": "## Risks...Budget"`), and `replace_content_range` swaps only the blocks it names. The response carries
+  `previous_version_id`, the version saved right before the edit.
 
 ## Architecture
 

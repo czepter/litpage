@@ -33,6 +33,20 @@ const PROPERTIES: Json = {
   description: 'Database row property values keyed by property name, e.g. {"Status": "Done", "Due": "2026-10-24", "Tags": ["UI", "Web"], "Estimate": 3, "Done": true}. Use "title" or the title property’s name for the row title.',
   additionalProperties: true,
 };
+const QUERY_FILTERS: Json = {
+  type: 'array',
+  maxItems: 10,
+  items: {
+    type: 'object',
+    properties: {
+      property: str('Property name.'),
+      operator: { type: 'string', enum: ['equals', 'not_equals', 'contains', 'is_empty', 'is_not_empty', 'before', 'after'] },
+      value: str('Value to compare with (dates as YYYY-MM-DD).'),
+    },
+    required: ['property', 'operator'],
+    additionalProperties: false,
+  },
+};
 const PROPERTY_DEFS: Json = {
   type: 'array',
   maxItems: 40,
@@ -122,20 +136,7 @@ export const TOOL_DEFS: ToolDef[] = [
       type: 'object',
       properties: {
         database_id: str('The database id (a database page or inline database block, or its data source id).'),
-        filters: {
-          type: 'array',
-          maxItems: 10,
-          items: {
-            type: 'object',
-            properties: {
-              property: str('Property name.'),
-              operator: { type: 'string', enum: ['equals', 'not_equals', 'contains', 'is_empty', 'is_not_empty', 'before', 'after'] },
-              value: str('Value to compare with (dates as YYYY-MM-DD).'),
-            },
-            required: ['property', 'operator'],
-            additionalProperties: false,
-          },
-        },
+        filters: QUERY_FILTERS,
         sort: { type: 'object', properties: { property: str('Property name.'), direction: { type: 'string', enum: ['ascending', 'descending'] } }, required: ['property'], additionalProperties: false },
         limit: { type: 'integer', minimum: 1, maximum: 200, description: 'Maximum rows (default 50).' },
       },
@@ -152,8 +153,17 @@ export const TOOL_DEFS: ToolDef[] = [
   {
     name: 'view_version_history',
     access: 'read',
-    description: 'List the saved versions of a page (time and editors), or read one version as Markdown when version_id is given. Use it when the user asks what changed or what a page used to say.',
-    input_schema: { type: 'object', properties: { page_id: str('The page id.'), version_id: str('A version id from the list.') }, required: ['page_id'], additionalProperties: false },
+    description: 'List the saved versions of a page or database row (time, editors, names), read one version as Markdown when version_id is given, or compare it with compare_with ("current" for today’s page, or another version id) as a line diff. Use it when the user asks what changed, what a page used to say, or before restoring a version.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_id: str('The page id.'),
+        version_id: str('A version id from the list.'),
+        compare_with: str('With version_id: "current" or another version id — returns the changes between the two instead of the full text.'),
+      },
+      required: ['page_id'],
+      additionalProperties: false,
+    },
   },
   {
     name: 'list_people',
@@ -208,20 +218,70 @@ export const TOOL_DEFS: ToolDef[] = [
   {
     name: 'update_page',
     access: 'write',
-    description: 'Edit a page. Commands: "update_properties" (title, icon, or database row properties); "append_content" (add Markdown at the end); "insert_content_after" (add Markdown after the block matched by selection_with_ellipsis); "replace_content_range" (replace the blocks matched by selection_with_ellipsis with new_str); "replace_content" (replace the whole body with new_str). Replacing content never removes sub-pages or databases: they stay on the page after the new content (use delete_pages / move_pages for them). selection_with_ellipsis is the start and end of the target text as it appears in read_page output, joined by "..." — e.g. "## Risks...owner: Ada" — or a short unique snippet. Read the page first.',
+    description: 'Edit a page. Commands: "update_properties" (title, icon, or database row properties); "append_content" (add Markdown at the end); "insert_content_after" (add Markdown after the block matched by selection_with_ellipsis); "replace_text" (replace the exact text old_str with new_str inside the page’s blocks — keeps the blocks, their formatting and comments; replace_all for every occurrence; several changes at once with content_updates, applied together or not at all); "replace_content_range" (replace the blocks matched by selection_with_ellipsis with new_str); "replace_content" (replace the whole body with new_str). Replacing content never removes sub-pages or databases: they stay on the page after the new content (use delete_pages / move_pages for them). selection_with_ellipsis is the start and end of the target text as it appears in read_page output, joined by "..." — e.g. "## Risks...owner: Ada" — or a short unique snippet. Prefer replace_text for small wording changes. Every edit first saves the page’s current state as a version (the result names it), so it can be restored with manage_versions. Read the page first.',
     input_schema: {
       type: 'object',
       properties: {
         page_id: str('The page id.'),
-        command: { type: 'string', enum: ['update_properties', 'append_content', 'insert_content_after', 'replace_content_range', 'replace_content'] },
+        command: { type: 'string', enum: ['update_properties', 'append_content', 'insert_content_after', 'replace_text', 'replace_content_range', 'replace_content'] },
         title: str('New title (update_properties).'),
         icon: str('New emoji icon (update_properties).'),
         properties: PROPERTIES,
         selection_with_ellipsis: str('Target text: "start...end" or a unique snippet.'),
-        new_str: str('Markdown to insert or to replace with.'),
+        old_str: str('replace_text: the exact text to find, case-sensitive — plain text, or with inline Markdown as read_page shows it (**bold**, *italic*, ~~strike~~, `code`, [link](url)).'),
+        new_str: str('Markdown to insert or to replace with (replace_text: plain text keeps the formatting of the replaced text; with inline Markdown on either side the new text is formatted as written; empty removes old_str).'),
+        replace_all: { type: 'boolean', description: 'replace_text: replace every occurrence (otherwise old_str must occur exactly once).' },
+        content_updates: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 100,
+          description: 'replace_text: several replacements in one call, in order (instead of old_str / new_str).',
+          items: {
+            type: 'object',
+            properties: { old_str: str('Exact text to find.'), new_str: str('Text to put in its place (empty removes it).'), replace_all: { type: 'boolean' } },
+            required: ['old_str'],
+            additionalProperties: false,
+          },
+        },
         suggest: { type: 'boolean', description: 'Write the change as a suggested edit the user accepts or rejects on the page instead of editing directly — when the user asks you to "suggest edits", or can only comment. Works with replace_content_range inside one text / heading / list / to-do block (one call per block; an empty new_str suggests removing the text).' },
       },
       required: ['page_id', 'command'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'update_rows',
+    access: 'write',
+    description: 'Change several database rows at once: the rows given by page_ids, or every row matching filters (same filters as query_database), or all rows with all: true (up to 200 per call). properties sets values (like update_page); add_values / remove_values add or remove single values of multi-select, person and relation properties without touching the others. The database is saved as a version first (the result names it).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        database_id: str('The database id.'),
+        page_ids: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 200, description: 'Rows to change.' },
+        filters: QUERY_FILTERS,
+        all: { type: 'boolean', description: 'Change every row of the database.' },
+        properties: PROPERTIES,
+        add_values: { type: 'object', additionalProperties: true, description: 'Values to add, keyed by property name, e.g. {"Tags": ["Urgent"], "Assignee": ["Ada"]}.' },
+        remove_values: { type: 'object', additionalProperties: true, description: 'Values to remove, keyed by property name.' },
+      },
+      required: ['database_id'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'manage_versions',
+    access: 'write',
+    description: 'Version a page or database row: "save" stores its current state as a version (optionally named, e.g. "Before rewrite"); "restore" writes a version from view_version_history back — content, title and icon, and the databases it shows (restore_databases: false leaves inline databases as they are). A restore first saves today’s state as a version, so it can be undone by restoring that one.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        page_id: str('The page id.'),
+        action: { type: 'string', enum: ['save', 'restore'] },
+        version_id: str('restore: the version to bring back.'),
+        name: str('save: a name for the version (shown in Version history).'),
+        restore_databases: { type: 'boolean', description: 'restore: also restore inline databases on the page (default true).' },
+      },
+      required: ['page_id', 'action'],
       additionalProperties: false,
     },
   },
