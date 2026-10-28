@@ -3750,5 +3750,10 @@
   "lp.templates.work_smarter": "Arbeite smarter",
   "lp.templates.write_a_review": "Rezension schreiben",
   "lp.templates.your_name": "Dein Name",
-  "lp.templates.your_rating": "Deine Bewertung"
+  "lp.templates.your_rating": "Deine Bewertung",
+  "lp.home.trash_empty": "Der Papierkorb ist leer. Gelöschte Seiten und Datenbankeinträge erscheinen hier und lassen sich wiederherstellen.",
+  "lp.home.trash_retention": "Einträge im Papierkorb werden nach {deleteFromTrashDelayString} automatisch gelöscht.",
+  "lp.home.trash_location": "Ort",
+  "lp.home.deleted_by": "Gelöscht von",
+  "lp.home.deleted": "Gelöscht"
 }
