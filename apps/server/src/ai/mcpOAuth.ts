@@ -60,20 +60,17 @@ const TRUST_PROXY = process.env.NC_TRUST_PROXY === '1';
 // ---------------------------------------------------------------------------------------------
 // Addresses
 
-/** The service's public origin: NC_PUBLIC_URL, otherwise the request's own (X-Forwarded-* behind a proxy). */
+/**
+ * The origin the client reached (X-Forwarded-* behind a proxy). Not NC_PUBLIC_URL: MCP clients require the issuer and
+ * the endpoints on the host they connected to, and a service can answer on more than one name.
+ */
 export function publicOrigin(c: Context): string {
-  const env = process.env.NC_PUBLIC_URL?.trim();
-  if (env) {
-    try {
-      return new URL(env).origin;
-    } catch {
-      /* fall back to the request */
-    }
-  }
   const url = new URL(c.req.url);
-  const proto = (TRUST_PROXY && c.req.header('x-forwarded-proto')?.split(',')[0]?.trim()) || url.protocol.replace(/:$/, '');
-  const host = (TRUST_PROXY && c.req.header('x-forwarded-host')?.split(',')[0]?.trim()) || c.req.header('host') || url.host;
-  return `${proto}://${host}`;
+  const fwdProto = TRUST_PROXY ? c.req.header('x-forwarded-proto')?.split(',')[0]?.trim().toLowerCase() : undefined;
+  const fwdHost = TRUST_PROXY ? c.req.header('x-forwarded-host')?.split(',')[0]?.trim() : undefined;
+  const proto = fwdProto === 'https' || fwdProto === 'http' ? fwdProto : url.protocol.replace(/:$/, '');
+  const host = [fwdHost, c.req.header('host'), url.host].find((h) => !!h && /^([A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*|\[[0-9A-Fa-f:.]+\])(:\d{1,5})?$/.test(h)) ?? url.host;
+  return `${proto}://${host.toLowerCase()}`;
 }
 
 /** Protected resource metadata URL for an MCP endpoint path (/mcp or /api/mcp), announced in 401 responses. */
