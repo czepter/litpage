@@ -369,7 +369,7 @@ export function revokeGrant(client: ClientRow, token: string) {
 // Pages
 
 function page(title: string, body: string, nonce?: string): Response {
-  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="referrer" content="no-referrer">
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="referrer" content="same-origin">
 <title>${esc(title)}</title><style${nonce ? ` nonce="${nonce}"` : ''}>
 :root{color-scheme:light dark;--bg:#f7f7f5;--card:#fff;--text:#37352f;--muted:#787774;--line:#e9e9e7;--accent:#2383e2}
 @media (prefers-color-scheme:dark){:root{--bg:#191919;--card:#252525;--text:#e6e6e4;--muted:#9b9a97;--line:#373737}}

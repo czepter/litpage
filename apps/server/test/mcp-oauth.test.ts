@@ -134,6 +134,8 @@ describe('authorization', () => {
     const p = pkce();
     const c = await consent(sessionA, client.client_id, p.challenge, { csrf: 'forged' });
     expect(c.html).toContain('OAuth Lab');
+    // no-referrer would make browsers send "Origin: null" with the form, which the cross-site check refuses
+    expect(c.html).toContain('<meta name="referrer" content="same-origin">');
     expect(c.html).toContain('client.example');
     expect(c.status).toBe(403);
     const crossSite = await req('/oauth/authorize', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', cookie: `lit_session=${sessionA}`, origin: 'https://evil.example', 'sec-fetch-site': 'cross-site' }, body: form({ client_id: client.client_id }) });
