@@ -208,7 +208,7 @@ export const TOOL_DEFS: ToolDef[] = [
   {
     name: 'update_page',
     access: 'write',
-    description: 'Edit a page. Commands: "update_properties" (title, icon, or database row properties); "append_content" (add Markdown at the end); "insert_content_after" (add Markdown after the block matched by selection_with_ellipsis); "replace_content_range" (replace the blocks matched by selection_with_ellipsis with new_str); "replace_content" (replace the whole body with new_str). selection_with_ellipsis is the start and end of the target text as it appears in read_page output, joined by "..." — e.g. "## Risks...owner: Ada" — or a short unique snippet. Read the page first.',
+    description: 'Edit a page. Commands: "update_properties" (title, icon, or database row properties); "append_content" (add Markdown at the end); "insert_content_after" (add Markdown after the block matched by selection_with_ellipsis); "replace_content_range" (replace the blocks matched by selection_with_ellipsis with new_str); "replace_content" (replace the whole body with new_str). Replacing content never removes sub-pages or databases: they stay on the page after the new content (use delete_pages / move_pages for them). selection_with_ellipsis is the start and end of the target text as it appears in read_page output, joined by "..." — e.g. "## Risks...owner: Ada" — or a short unique snippet. Read the page first.',
     input_schema: {
       type: 'object',
       properties: {
