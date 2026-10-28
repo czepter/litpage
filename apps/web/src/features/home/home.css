@@ -133,7 +133,7 @@
 }
 .nc-lib-open:hover { background: var(--lp-bg-interactive); }
 .nc-lib-item:hover .nc-lib-open { display: inline-flex; }
-.nc-lib-person { gap: 6px; }
+.nc-lib-person, .nc-lib-type { gap: 6px; }
 .nc-lib-avatar {
   display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; border-radius: 100%; overflow: hidden; line-height: 1;
   background: var(--lp-popover-background); color: var(--lp-icon-secondary); outline: 1px solid var(--lp-border-secondary-transparent); outline-offset: -1px; font-weight: 400;

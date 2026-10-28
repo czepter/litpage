@@ -12,7 +12,7 @@ import { TeamIcon } from '../../shell/sidebar/TeamIcon.tsx';
 import { pageTitle } from '../../page/pageActions.ts';
 import { t } from '../../shell/i18n.ts';
 import {
-  COL_ICON, COL_KIND, DEFAULT_WIDTH, colLabel, dateValue, groupOf, libraryTime, personValue, sourceOf, useLibraryViews, userName, userOf,
+  COL_ICON, COL_KIND, CONTENT_TYPE_ICON, DEFAULT_WIDTH, colLabel, contentTypeLabel, contentTypeOf, dateValue, groupOf, libraryTime, personValue, sourceOf, useLibraryViews, userName, userOf,
   type ColKey, type LibView, type PageTab, type Row,
 } from './model.ts';
 import { LibAvatar, openColumnMenu } from './menus.tsx';
@@ -295,6 +295,15 @@ function CellValue({ b, row, col, sv }: { b: BlockRecord; row: Row; col: ColKey;
       <div className="nc-lib-cell-inner nc-lib-person">
         <LibAvatar user={u} />
         <span className="nc-ellipsis notranslate">{userName(u)}</span>
+      </div>
+    );
+  }
+  if (kind === 'type') {
+    const c = contentTypeOf(b);
+    return (
+      <div className="nc-lib-cell-inner nc-lib-type">
+        <Icon name={CONTENT_TYPE_ICON[c]} size={16} style={{ color: 'var(--lp-icon-secondary)' }} />
+        <span className="nc-ellipsis">{contentTypeLabel(c)}</span>
       </div>
     );
   }

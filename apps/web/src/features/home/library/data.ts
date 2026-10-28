@@ -1,4 +1,4 @@
-// Rows for the Library tabs (Recents / Favorites / Shared / Private / AI Meeting Notes) plus lazy loading of
+// Rows for the Library tabs (All content / Recents / Favorites / Shared / Private / AI Meeting Notes) plus lazy loading of
 // sub-page records (row toggles) and missing parents/users (Source / Created by columns).
 import { useEffect, useMemo, useState } from 'react';
 import type { BlockRecord, CollectionRecord, TeamRecord } from '@nc/shared/records.ts';
@@ -84,6 +84,45 @@ export function useMeetingNotes(enabled = true): { rows: Row[]; loaded: boolean 
   return { rows, loaded };
 }
 
+/** Every page, database and database row the user can open (server query + anything already in the record cache). */
+export function useAllContent(enabled = true): { rows: Row[]; loaded: boolean } {
+  const spaceId = useSession((s) => s.spaceId);
+  const ver = useTableVersion(['block']);
+  const [serverIds, setServerIds] = useState<string[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    if (!spaceId || !enabled) return;
+    let live = true;
+    const load = () =>
+      api('getLibraryAllPages', { spaceId })
+        .then((res) => {
+          if (!live) return;
+          records.mergeRecordMap(res.recordMap);
+          setServerIds(res.pageIds ?? []);
+          setLoaded(true);
+        })
+        .catch(() => live && setLoaded(true));
+    void load();
+    window.addEventListener('nc:resync', load);
+    return () => {
+      live = false;
+      window.removeEventListener('nc:resync', load);
+    };
+  }, [spaceId, enabled]);
+  const rows = useMemo(() => {
+    if (!enabled) return [];
+    const local = records
+      .all<BlockRecord>('block')
+      .filter((b) => b.space_id === spaceId && PAGE_LIKE.has(b.type) && b.alive !== false && !b.is_template)
+      .map((b) => b.id);
+    const ids = [...new Set([...serverIds, ...local])].filter(alive);
+    ids.sort((a, b) => (records.get<BlockRecord>('block', b)?.last_edited_time ?? 0) - (records.get<BlockRecord>('block', a)?.last_edited_time ?? 0));
+    return ids.map((id) => ({ id }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverIds, spaceId, ver, enabled]);
+  return { rows, loaded };
+}
+
 /** Natural (unsorted) rows for a page tab. */
 export function useLibraryRows(tab: PageTab): { rows: Row[]; loaded: boolean } {
   const sv = useCurrentSpaceView();
@@ -94,6 +133,7 @@ export function useLibraryRows(tab: PageTab): { rows: Row[]; loaded: boolean } {
   const sharedWithMe = useSidebarData((s) => s.sharedWithMe);
   const recents = useRecentVisits(tab === 'recents');
   const meetings = useMeetingNotes(tab === 'meetings');
+  const all = useAllContent(tab === 'all');
   useEffect(() => {
     if (tab === 'shared') refreshSharedWithMe(spaceId);
   }, [tab, spaceId]);
@@ -102,6 +142,8 @@ export function useLibraryRows(tab: PageTab): { rows: Row[]; loaded: boolean } {
     const byEdited = (ids: string[]) =>
       [...ids].sort((a, b) => (records.get<BlockRecord>('block', b)?.last_edited_time ?? 0) - (records.get<BlockRecord>('block', a)?.last_edited_time ?? 0));
     switch (tab) {
+      case 'all':
+        return all.rows;
       case 'recents':
         return recents.rows.filter((r) => alive(r.id));
       case 'favorites':
@@ -117,9 +159,9 @@ export function useLibraryRows(tab: PageTab): { rows: Row[]; loaded: boolean } {
         return meetings.rows;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, sv, space, uid, sharedWithMe, recents.rows, meetings.rows, ver]);
+  }, [tab, sv, space, uid, sharedWithMe, recents.rows, meetings.rows, all.rows, ver]);
 
-  const loaded = tab === 'recents' ? recents.loaded : tab === 'meetings' ? meetings.loaded : true;
+  const loaded = tab === 'recents' ? recents.loaded : tab === 'meetings' ? meetings.loaded : tab === 'all' ? all.loaded : true;
   return { rows, loaded };
 }
 

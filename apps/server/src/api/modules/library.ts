@@ -1,6 +1,7 @@
 // Library page data that the client's record cache may not hold yet:
 //  - getLibraryMeetingNotes: pages that are AI meeting notes (contain a meeting_notes/transcription block, or are
 //    titled "Meeting notes …") for the "AI Meeting Notes" tab and the Meetings page.
+//  - getLibraryAllPages: every page, database and database row the user can open, for the "All content" tab.
 //  - getLibraryPageMeta: users + parents (Source column) for a set of pages.
 import type { BlockRecord, CollectionRecord, TeamRecord } from '@nc/shared/records.ts';
 import { toPlainText } from '@nc/shared/richtext.ts';
@@ -73,6 +74,27 @@ export const handlers: Record<string, Handler> = {
     for (const b of sorted) {
       if (ids.length >= max) break;
       if (blockRole(b.id, uid) === 'none') continue;
+      rm.add('block', b);
+      addParents(b, rm);
+      rm.add('lit_user', getRecord('lit_user', b.created_by_id), 'reader');
+      rm.add('lit_user', getRecord('lit_user', b.last_edited_by_id), 'reader');
+      ids.push(b.id);
+    }
+    return { pageIds: ids, recordMap: rm.map };
+  },
+
+  getLibraryAllPages(ctx, { spaceId, limit }) {
+    const uid = requireUser(ctx);
+    const max = Math.min(Number(limit) || 2000, 5000);
+    const rows = db.prepare(`SELECT data FROM records WHERE tbl = 'block' AND space_id = ? AND alive = 1
+                             AND json_extract(data, '$.type') IN ('page', 'collection_view_page')
+                             ORDER BY last_edited_time DESC LIMIT ?`).all(String(spaceId), max * 2) as { data: string }[];
+    const rm = new RecordMapBuilder(uid);
+    const ids: string[] = [];
+    for (const r of rows) {
+      if (ids.length >= max) break;
+      const b = JSON.parse(r.data) as BlockRecord;
+      if (b.is_template || blockRole(b.id, uid) === 'none') continue;
       rm.add('block', b);
       addParents(b, rm);
       rm.add('lit_user', getRecord('lit_user', b.created_by_id), 'reader');
