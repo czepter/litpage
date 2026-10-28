@@ -1,6 +1,6 @@
 // Public REST API under /v1: the API surface for internal connections and
 // personal access tokens: users, search, pages (+ property items, Markdown), blocks, databases / data sources (query
-// with filters and sorts), comments.
+// with filters and sorts), views and linked views (views.ts), comments.
 // Authorization: Bearer <token> · Litpage-Version: 2026-10-01 (optional)
 // Every read and write runs as the token's principal (a connection's bot or the token's person): reads go through
 // blockRole + the database property access rules (objects.ts), writes are ordinary transactions through
@@ -37,6 +37,7 @@ import { compileFilter, compileSorts, sortRows } from './query.ts';
 import { pageAsMarkdown, pageUnitsAs } from './markdown.ts';
 import { recordRequest, integrationsInSpace, type Capabilities } from './store.ts';
 import { DEMO_MESSAGE, isDemoMode } from '../demo.ts';
+import { VIEW_ROUTES } from './views.ts';
 
 type Json = Record<string, any>;
 
@@ -859,6 +860,7 @@ const ROUTES: [string, string, Handler][] = [
   ['POST', '/data_sources/:id/query', dataSourcesQuery],
   ['GET', '/comments', commentsList],
   ['POST', '/comments', commentsCreate],
+  ...VIEW_ROUTES,
 ];
 
 function ratePerMin(): number {

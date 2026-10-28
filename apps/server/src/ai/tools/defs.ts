@@ -72,6 +72,26 @@ const CHART_FIELDS: Record<string, Json> = {
   },
 };
 
+/** Saved filters of a linked view (stored with the view, so it stays live). */
+const LINKED_FILTERS: Json = {
+  type: 'array',
+  maxItems: 10,
+  items: {
+    type: 'object',
+    properties: {
+      property: str('Property name.'),
+      operator: {
+        type: 'string',
+        enum: ['equals', 'not_equals', 'contains', 'not_contains', 'starts_with', 'ends_with', 'greater_than', 'less_than', 'before', 'after', 'on_or_before', 'on_or_after', 'within', 'is_empty', 'is_not_empty'],
+        description: 'select / status: equals, not_equals (a status group name like "Complete" works too); multi-select, person, relation: contains, not_contains; dates: before, after, on_or_before, on_or_after, equals, within.',
+      },
+      value: str('Value to compare with: an option, a person’s name or email ("me" for whoever looks at the view), a number, true / false, a date as YYYY-MM-DD or today / tomorrow / yesterday / one_week_ago / one_week_from_now / one_month_ago / one_month_from_now; for within one of this_week, past_week, past_month, past_year, next_week, next_month, next_year.'),
+    },
+    required: ['property', 'operator'],
+    additionalProperties: false,
+  },
+};
+
 const VIEWS: Json = {
   type: 'array',
   maxItems: 8,
@@ -354,6 +374,48 @@ export const TOOL_DEFS: ToolDef[] = [
         add_views: VIEWS,
       },
       required: ['database_id'],
+      additionalProperties: false,
+    },
+  },
+  {
+    // linked views (content/linkedViews.ts): live, filtered views of other databases on one page
+    name: 'create_linked_views',
+    access: 'write',
+    description: 'Show existing databases on a page as live linked views — e.g. an overall roadmap over the roadmaps of several teams. Each view shows one database (by database_id) with its own layout, filters, sort and grouping, and always reflects the database’s current rows. Give title to create a new overview page under parent; omit it to add the views to the parent page itself; or give target_database_id to add them as new tabs of an existing database or linked database. layout tabs (default) puts all views in one linked database with a tab per view; stacked puts one linked database per view under each other, each under a heading. Rows are not merged into one table: every view keeps its own database.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        parent: PARENT,
+        title: str('Create a new page with this title for the views (an overview page).'),
+        target_database_id: str('Add the views as new tabs of this existing database or linked database instead.'),
+        layout: { type: 'string', enum: ['tabs', 'stacked'], description: 'tabs (default): one linked database, a tab per view. stacked: one linked database per view, each under a heading.' },
+        views: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 12,
+          items: {
+            type: 'object',
+            properties: {
+              database_id: str('The database to show (a database page or inline database, or its data source id).'),
+              type: { type: 'string', enum: ['table', 'board', 'list', 'gallery', 'calendar', 'timeline', 'chart'], description: 'Layout (default table).' },
+              name: str('View (tab) name, e.g. the team’s name.'),
+              group_by: str('Property name to group a board by, or a chart’s X axis.'),
+              date_property: str('calendar / timeline: the date property to place rows by.'),
+              filters: LINKED_FILTERS,
+              filter_match: { type: 'string', enum: ['and', 'or'], description: 'Rows must match all filters (and, default) or any of them (or).' },
+              sort: {
+                type: 'array',
+                maxItems: 5,
+                items: { type: 'object', properties: { property: str('Property name.'), direction: { type: 'string', enum: ['ascending', 'descending'] } }, required: ['property'], additionalProperties: false },
+              },
+              ...CHART_FIELDS,
+            },
+            required: ['database_id'],
+            additionalProperties: false,
+          },
+        },
+      },
+      required: ['views'],
       additionalProperties: false,
     },
   },

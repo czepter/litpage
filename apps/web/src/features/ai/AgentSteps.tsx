@@ -32,7 +32,7 @@ const STEP_ICON: Record<string, string> = {
   search_workspace: 'aiStepSearch', read_page: 'aiStepView', query_database: 'aiStepDatabase', read_comments: 'aiStepComment',
   view_version_history: 'aiStepHistory', list_people: 'aiStepPeople', list_notifications: 'aiStepInbox', use_skill: 'aiStepSkill',
   create_pages: 'aiStepCreate', update_page: 'aiStepEdit', update_rows: 'aiStepDatabase', manage_versions: 'aiStepHistory', delete_pages: 'aiStepTrash', list_trash: 'aiStepTrash', restore_pages: 'aiStepTrash', move_pages: 'aiStepMove', create_database: 'aiStepDatabase',
-  update_database: 'aiStepDatabase', add_comment: 'aiStepComment', update_notifications: 'aiStepInbox', update_memory: 'aiStepMemory',
+  update_database: 'aiStepDatabase', create_linked_views: 'aiStepDatabase', add_comment: 'aiStepComment', update_notifications: 'aiStepInbox', update_memory: 'aiStepMemory',
   create_skill: 'aiStepSkill', propose_plan: 'aiStepPlan', web_search: 'aiStepGlobe', web_fetch: 'aiStepGlobe', mcp: 'aiStepPlug',
 };
 
