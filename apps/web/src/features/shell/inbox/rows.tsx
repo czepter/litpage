@@ -41,10 +41,11 @@ export function rich(id: string, def: string, parts: Record<string, ReactNode>, 
 
 export function itemDate(ts: number): string {
   const ko = getLocale() === 'ko-KR';
+  const de = getLocale() === 'de-DE';
   const s = Math.floor((Date.now() - ts) / 1000);
-  if (s < 60) return ko ? '방금' : 'Just now';
+  if (s < 60) return ko ? '방금' : de ? 'Gerade eben' : 'Just now';
   const m = Math.floor(s / 60);
-  if (m < 60) return ko ? `${m}분 전` : `${m}m ago`;
+  if (m < 60) return ko ? `${m}분 전` : de ? `vor ${m} Min.` : `${m}m ago`;
   const d = new Date(ts);
   if (d.toDateString() === new Date().toDateString()) return d.toLocaleTimeString(getLocale(), { hour: 'numeric', minute: '2-digit' });
   const sameYear = d.getFullYear() === new Date().getFullYear();

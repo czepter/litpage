@@ -13,7 +13,7 @@ import {
   type StartPage,
 } from '../userSettings.ts';
 
-/** Languages offered by the language picker (native name, English name). The UI itself is translated into en-US and ko-KR. */
+/** Languages offered by the language picker (native name, English name). The UI itself is translated into en-US, ko-KR and de-DE. */
 export const LANGUAGES: { id: string; native: string; english: string }[] = [
   { id: 'ar-SA', native: 'العربية', english: 'Arabic' },
   { id: 'da-DK', native: 'Dansk', english: 'Danish' },
