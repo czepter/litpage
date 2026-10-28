@@ -6,6 +6,7 @@ import { toPlainText } from '@nc/shared/richtext.ts';
 import { childrenOf, getRecord } from '../db.ts';
 import { blockRole } from '../records.ts';
 import { searchText } from '../search.ts';
+import { inTrash } from '../tree.ts';
 import { hitVisible, visibleCollection, visibleHitText, visibleRow, visibleRows } from './visibility.ts';
 import { inScope } from './tools/scope.ts';
 import {
@@ -187,7 +188,7 @@ export function searchPages(spaceId: string, userId: string, query: string, limi
   const ranked = [...scores.entries()].sort((a, b) => b[1].terms.size - a[1].terms.size || b[1].score - a[1].score);
   for (const [pageId, s] of ranked) {
     const b = getRecord<BlockRecord>('block', pageId);
-    if (!b || b.alive === false || !canRead(pageId, userId)) continue;
+    if (!b || inTrash(b) || !canRead(pageId, userId)) continue;
     out.push({ pageId, title: blockTitle(b) || 'Untitled', snippet: s.snippet, score: s.score, ...(s.blockId && s.blockId !== pageId ? { blockId: s.blockId } : {}) });
     if (out.length >= limit) break;
   }

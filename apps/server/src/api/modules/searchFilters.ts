@@ -7,6 +7,7 @@ import { toPlainText } from '@nc/shared/richtext.ts';
 import { db, getRecord } from '../../db.ts';
 import { RecordMapBuilder, blockRole } from '../../records.ts';
 import { pageIdOf, searchTerms, searchText } from '../../search.ts';
+import { inTrash } from '../../tree.ts';
 import { isArchived } from '@nc/shared/archive.ts';
 import { readVerification } from '@nc/shared/verification.ts';
 
@@ -185,8 +186,8 @@ export function quickFindSearch(uid: string, body: { query?: string; spaceId?: s
   const rows: Row[] = [];
   for (const c of candidates.values()) {
     const page = getRecord<BlockRecord>('block', c.pageId);
-    if (!page) continue;
-    if (!page.alive) continue;
+    // rows of a trashed database and sub-pages of a trashed page are in Trash too
+    if (!page || inTrash(page)) continue;
     // Content status : archived pages only with "including archived" / "Archived"
     const archived = isArchived(archiveLookup, page.id);
     if (filters.contentStatus === 'archived_only' ? !archived : filters.contentStatus !== 'all_with_archived' && archived) continue;

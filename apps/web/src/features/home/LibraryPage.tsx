@@ -1,6 +1,6 @@
 // Library (/<domain>/library/<tab>): full-page library with tabbed views and table controls.
 // h1 "Library" + per-tab primary button, pill tabs (Teamspaces / All content / Recents / Favorites / Shared / Private /
-// AI meeting notes / Skills) with "N more" overflow, Filter, Sort, Search, and Settings tools, table views,
+// AI meeting notes / Agents / Skills / Trash) with "N more" overflow, Filter, Sort, Search, and Settings tools, table views,
 // filter bar, right "View settings" panel, empty states for AI notes and Skills.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { BlockRecord } from '@nc/shared/records.ts';
@@ -26,6 +26,7 @@ import {
 import { filterSummary, isTabWithTable, openFilterEditor, openFilterMenu, openPropertyVisibilityMenu, openSortMenu, pendingFilterEditor } from './library/menus.tsx';
 import { useLibraryRows } from './library/data.ts';
 import { LibraryTable } from './library/LibraryTable.tsx';
+import { TrashTab } from './library/TrashTab.tsx';
 import { TeamspacesTab } from './library/TeamspacesTab.tsx';
 import { createNewSkill, SkillsTab } from '../ai/SkillsLibrary.tsx';
 import { AgentDirectory } from '../agents/AgentDirectory.tsx';
@@ -120,11 +121,11 @@ export function LibraryPage() {
           toggleSettings={() => setSettingsOpen((v) => !v)}
         />
         {isTabWithTable(tab) && <FilterBar tab={tab} />}
-        <div className="nc-lib-main" style={{ marginInlineEnd: settingsOpen && tab !== 'skills' && tab !== 'agents' ? 290 : 0 }}>
+        <div className="nc-lib-main" style={{ marginInlineEnd: settingsOpen && tab !== 'skills' && tab !== 'agents' && tab !== 'trash' ? 290 : 0 }}>
           <TabBody tab={tab} query={query} />
         </div>
       </div>
-      {settingsOpen && tab !== 'skills' && tab !== 'agents' && <SettingsPanel tab={tab} top={panelTop} onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && tab !== 'skills' && tab !== 'agents' && tab !== 'trash' && <SettingsPanel tab={tab} top={panelTop} onClose={() => setSettingsOpen(false)} />}
     </div>
   );
 }
@@ -214,7 +215,7 @@ function ViewBar({ tab, onTab, searchOpen, setSearchOpen, query, setQuery, setti
           {LIB_TABS.map((x) => tabEl(x, true))}
         </div>
         <div className="nc-lib-tools">
-          {tab !== 'teamspaces' && tab !== 'agents' && (
+          {tab !== 'teamspaces' && tab !== 'agents' && tab !== 'trash' && (
             <div
               role="button"
               aria-label={t('lp.home.filter', 'Filter')}
@@ -250,7 +251,7 @@ function ViewBar({ tab, onTab, searchOpen, setSearchOpen, query, setQuery, setti
               <Icon name="magnifyingGlassSmall" size={16} />
             </div>
           )}
-          {tab !== 'skills' && tab !== 'agents' && (
+          {tab !== 'skills' && tab !== 'agents' && tab !== 'trash' && (
             <div role="button" aria-label={t('lp.home.settings', 'Settings')} className={`nc-lib-tool ${settingsOpen ? 'pressed' : ''}`} data-tooltip={t('lp.home.settings', 'Settings')} onClick={toggleSettings}>
               <Icon name="slidersSmall" size={16} />
             </div>
@@ -306,6 +307,7 @@ function TabBody({ tab, query }: { tab: LibTab; query: string }) {
   if (tab === 'teamspaces') return <TeamspacesBody query={query} />;
   if (tab === 'skills') return <SkillsEmpty />;
   if (tab === 'agents') return <AgentDirectory query={query} />;
+  if (tab === 'trash') return <TrashTab query={query} />;
   return <PageTabBody tab={tab} query={query} />;
 }
 

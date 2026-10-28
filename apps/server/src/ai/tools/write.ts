@@ -11,6 +11,7 @@ import { annotationsOf, slice as sliceText, toPlainText, type Decoration, type R
 import { getPropertyValue } from '@nc/shared/database/values.ts';
 import { suggestEdit } from '@nc/shared/richtextSuggest.ts';
 import { getRecord } from '../../db.ts';
+import { childBlocks } from '../../tree.ts';
 import { OpsBuilder, shortPropId, type Spec } from '../../content/spec.ts';
 import { handlers as commentHandlers } from '../../api/modules/comments.ts';
 import { AiError } from '../client.ts';
@@ -86,6 +87,23 @@ function touch(ptr: { id: string; spaceId: string }, userId: string): Operation 
 
 function isDatabase(b: BlockRecord | undefined): boolean {
   return b?.type === 'collection_view_page' || b?.type === 'collection_view';
+}
+
+/** A sub-page or a database that holds its own data (not a linked view): replacing page content never trashes these. */
+function isSubPage(b: BlockRecord): boolean {
+  if (b.type === 'page') return true;
+  if (!isDatabase(b) || !b.collection_id) return false;
+  return getRecord<CollectionRecord>('collection', b.collection_id)?.parent_id === b.id;
+}
+
+/** Sub-pages nested in `b` (toggles, columns, callouts…), without descending into the sub-pages themselves. */
+function nestedSubPages(b: BlockRecord): BlockRecord[] {
+  const out: BlockRecord[] = [];
+  for (const c of childBlocks(b)) {
+    if (isSubPage(c)) out.push(c);
+    else if (!isDatabase(c)) out.push(...nestedSubPages(c));
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -304,14 +322,29 @@ export const updatePage: ToolRun = async (env, input, stepId) => {
         ({ first, last } = matchSelection(units, String(input.selection_with_ellipsis)));
       }
       const target = units.slice(first, Math.max(first, last + 1));
-      removed = target.map((u) => u.markdown);
       const before = first > 0 ? units[first - 1].id : undefined;
       if (specs.length) insertSpecs(b, page.id, specs, before ? { after: before } : { first: true });
-      const dead = target.map((u) => getRecord<BlockRecord>('block', u.id)).filter((x): x is BlockRecord => !!x);
+      // sub-pages and databases stay on the page, after the new content (only delete_pages trashes them)
+      const blocks = target.map((u) => getRecord<BlockRecord>('block', u.id)).filter((x): x is BlockRecord => !!x);
+      const kept = blocks.filter(isSubPage);
+      const dead = blocks.filter((x) => !isSubPage(x));
+      removed = target.filter((u) => !kept.some((k) => k.id === u.id)).map((u) => u.markdown);
+      // sub-pages nested in a removed block (toggle, column…) move up to the page, where that block was
+      for (const d of dead) {
+        for (const sub of nestedSubPages(d)) {
+          b.ops.push(mk.listRemove({ table: 'block', id: sub.parent_id, spaceId }, ['content'], sub.id));
+          b.ops.push(mk.update({ table: 'block', id: sub.id, spaceId }, [], { parent_id: page.id, parent_table: 'block' }));
+          b.ops.push(mk.listBefore(ptr, ['content'], sub.id, d.id));
+          kept.push(sub);
+        }
+      }
       b.ops.push(...deleteOps(dead, env.userId));
-      // removing sub-pages / databases or a lot of existing content is a potentially unsafe action
-      if (dead.some((x) => x.type === 'page' || isDatabase(x)) || dead.length > 8) risk = 'destructive';
+      // removing a lot of existing content is a potentially unsafe action
+      if (dead.length > 8) risk = 'destructive';
       summary = command === 'replace_content' ? `Replaced the content of “${title}”.` : `Replaced ${dead.length} block(s) in “${title}”.`;
+      if (kept.length) {
+        summary += ` Kept ${kept.length} sub-page(s) / database(s) on the page after the new content: ${kept.map((k) => `“${blockTitle(k) || 'Untitled'}” (page_id: ${k.id})`).join(', ')}. Don’t recreate them; use move_pages to place them elsewhere or delete_pages if the user asked to delete them.`;
+      }
     } else {
       throw new AiError('bad_request', `Unknown command ${command}.`, 400);
     }
